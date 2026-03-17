@@ -30,11 +30,17 @@ def get_functions() -> dict:
     from .descriptive import perceive_descriptive
     from .minimal_multishot import perceive_minimal_multishot
     from .descriptive_multishot import perceive_descriptive_multishot
+    from .contrastive import perceive_contrastive
+    from .temporal import perceive_temporal
+    from .temporal_v2 import perceive_temporal_v2
 
     _FUNCTIONS = {
         "minimal": perceive_minimal,
         "descriptive": perceive_descriptive,
         "minimal_multishot": perceive_minimal_multishot,
         "descriptive_multishot": perceive_descriptive_multishot,
+        "contrastive": perceive_contrastive,
+        "temporal": perceive_temporal,
+        "temporal_v2": perceive_temporal_v2,
     }
     return _FUNCTIONS
