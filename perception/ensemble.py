@@ -1,13 +1,16 @@
 """
 Ensemble perception function.
 
-Runs the unified prompt 3 times with temperature=0.3 and takes majority
-vote. This smooths out stochastic boundary errors where the model
-oscillates between adjacent stages.
+Runs the hybrid's stage-adaptive prompt 3 times with temperature=0.3
+and takes majority vote. This smooths out stochastic boundary errors.
 
-Cost: 3x API calls per timepoint.
+Uses hybrid approach (best at 83.2%) as the base, with temperature
+sampling to reduce boundary noise.
+
+Cost: 3x API calls per timepoint (run in parallel via asyncio.gather).
 """
 
+import asyncio
 from collections import Counter
 
 from ._base import (
@@ -19,8 +22,7 @@ from ._base import (
     STAGES,
 )
 
-# Use the unified prompt (best single-prompt design)
-from .unified import SYSTEM_PROMPT
+from .hybrid import _get_system_prompt, TEMPORAL_SYSTEM, SCIENTIFIC_SYSTEM
 
 ENSEMBLE_SIZE = 3
 TEMPERATURE = 0.3
@@ -32,15 +34,20 @@ async def perceive_ensemble(
     history: list[dict],
     timepoint: int,
 ) -> PerceptionOutput:
-    """Majority-vote ensemble: run 3x with temperature, take most common stage."""
-    content = build_reference_content(references)
+    """Majority-vote ensemble using hybrid's stage-adaptive prompts."""
+    # Determine expected stage from history (same logic as hybrid)
+    last_stage = "early"
+    if history:
+        last_stage = history[-1].get("stage", "early")
 
+    system_prompt = _get_system_prompt(last_stage)
+
+    content = build_reference_content(references)
     content.append({"type": "text", "text": f"\n=== CLASSIFY EMBRYO AT T{timepoint} ==="})
 
     history_text = build_history_text(history)
     if history_text:
         content.append({"type": "text", "text": history_text})
-        last_stage = history[-1].get("stage", "unknown") if history else "unknown"
         content.append({
             "type": "text",
             "text": (
@@ -62,24 +69,27 @@ async def perceive_ensemble(
         }
     )
 
-    content.append({
-        "type": "text",
-        "text": (
-            "Analyze step by step: "
-            "(1) What fraction of the eggshell is filled with signal — sparse, moderate, or dense? "
-            "(2) How many distinct parallel body segments can you count? "
-            "(3) Which reference images match best? "
-            "Then classify."
-        ),
-    })
+    # Add analysis prompt based on which system we're using
+    if system_prompt == SCIENTIFIC_SYSTEM:
+        content.append({
+            "type": "text",
+            "text": (
+                "Analyze: (1) How much of the eggshell is filled with signal? "
+                "(2) How many parallel body segments are visible? "
+                "(3) Which reference images match best? Then classify."
+            ),
+        })
+    else:
+        content.append({
+            "type": "text",
+            "text": "Compare this image to the reference images above. Which stage's references does it most closely match? Classify accordingly.",
+        })
 
-    # Run multiple times with temperature > 0
-    import asyncio
-    tasks = []
-    for _ in range(ENSEMBLE_SIZE):
-        tasks.append(
-            call_claude(system=SYSTEM_PROMPT, content=content, temperature=TEMPERATURE)
-        )
+    # Run 3x in parallel with temperature > 0
+    tasks = [
+        call_claude(system=system_prompt, content=content, temperature=TEMPERATURE)
+        for _ in range(ENSEMBLE_SIZE)
+    ]
     results = await asyncio.gather(*tasks)
 
     # Parse each result
@@ -89,9 +99,8 @@ async def perceive_ensemble(
     stage_counts = Counter(o.stage for o in outputs)
     majority_stage = stage_counts.most_common(1)[0][0]
 
-    # If tied, prefer the earlier stage (conservative)
-    if len(stage_counts) == ENSEMBLE_SIZE:  # all different
-        # Pick the earliest in the developmental order
+    # If all 3 different, prefer the earlier stage (conservative)
+    if len(stage_counts) == ENSEMBLE_SIZE:
         for s in STAGES:
             if s in stage_counts:
                 majority_stage = s
@@ -100,11 +109,10 @@ async def perceive_ensemble(
     # Average confidence, combine reasoning
     avg_conf = sum(o.confidence for o in outputs) / len(outputs)
     votes = ", ".join(f"{o.stage}({o.confidence:.0%})" for o in outputs)
-    majority_output = outputs[0]  # use first for reasoning base
 
     return PerceptionOutput(
         stage=majority_stage,
         confidence=avg_conf,
-        reasoning=f"Ensemble [{votes}] → {majority_stage}. {majority_output.reasoning}",
+        reasoning=f"Ensemble [{votes}] → {majority_stage}",
         phase_count=ENSEMBLE_SIZE,
     )

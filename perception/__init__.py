@@ -37,6 +37,7 @@ def get_functions() -> dict:
     from .scientific import perceive_scientific
     from .hybrid import perceive_hybrid
     from .unified import perceive_unified
+    from .ensemble import perceive_ensemble
 
     _FUNCTIONS = {
         "minimal": perceive_minimal,
@@ -50,5 +51,6 @@ def get_functions() -> dict:
         "scientific": perceive_scientific,
         "hybrid": perceive_hybrid,
         "unified": perceive_unified,
+        "ensemble": perceive_ensemble,
     }
     return _FUNCTIONS
