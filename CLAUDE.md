@@ -44,7 +44,7 @@ Using `claude-opus-4-6` (set in `perception/_base.py`).
 
 ## Git
 
-After each successful experiment (accuracy improves over baseline), commit the new perception function with the results in the commit message. Keep iterating after committing.
+Commit after EVERY experiment — successes and failures. Include the accuracy numbers and a brief note on what was tried in the commit message. This builds a searchable history of all approaches. Keep iterating after committing.
 
 ## Rules
 
