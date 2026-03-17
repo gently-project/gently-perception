@@ -42,6 +42,10 @@ Using `claude-opus-4-6` (set in `perception/_base.py`).
 | minimal | 48.5% | 29% | 82% | 12% |
 | descriptive | 48.0% | 33% | 46% | 18% |
 
+## Git
+
+After each successful experiment (accuracy improves over baseline), commit the new perception function with the results in the commit message. Keep iterating after committing.
+
 ## Rules
 
 - Only modify files in `perception/` — do not touch `benchmark/`, `run.py`, or `_base.py`
