@@ -34,6 +34,7 @@ def get_functions() -> dict:
     from .temporal import perceive_temporal
     from .temporal_v2 import perceive_temporal_v2
     from .temporal_v3 import perceive_temporal_v3
+    from .scientific import perceive_scientific
 
     _FUNCTIONS = {
         "minimal": perceive_minimal,
@@ -44,5 +45,6 @@ def get_functions() -> dict:
         "temporal": perceive_temporal,
         "temporal_v2": perceive_temporal_v2,
         "temporal_v3": perceive_temporal_v3,
+        "scientific": perceive_scientific,
     }
     return _FUNCTIONS
