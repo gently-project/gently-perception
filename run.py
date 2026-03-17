@@ -212,6 +212,75 @@ async def run_variant(variant_name, perceive_fn, testset, references, max_timepo
     return exact, report
 
 
+def plot_results(results: dict[str, dict], output_path: Path):
+    """Generate per-stage accuracy bar chart comparing all variants."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not installed — skipping chart generation")
+        return
+
+    from perception._base import STAGES
+
+    # Collect stages that have data
+    stages_with_data = []
+    for stage in STAGES:
+        for report in results.values():
+            ps = report["metrics"]["per_stage"].get(stage, {})
+            if ps.get("n", 0) > 0:
+                stages_with_data.append(stage)
+                break
+
+    if not stages_with_data:
+        return
+
+    variant_names = sorted(results.keys())
+    n_variants = len(variant_names)
+    n_stages = len(stages_with_data)
+
+    fig, ax = plt.subplots(figsize=(max(8, n_stages * 1.5), 5))
+
+    bar_width = 0.8 / n_variants
+    x = range(n_stages)
+
+    colors = plt.cm.Set2(range(n_variants))
+
+    for i, name in enumerate(variant_names):
+        report = results[name]
+        accuracies = []
+        for stage in stages_with_data:
+            ps = report["metrics"]["per_stage"].get(stage, {})
+            accuracies.append(ps.get("accuracy", 0))
+
+        offsets = [xi + (i - n_variants / 2 + 0.5) * bar_width for xi in x]
+        bars = ax.bar(offsets, [a * 100 for a in accuracies], bar_width,
+                      label=f"{name} ({report['metrics']['accuracy']:.0%})",
+                      color=colors[i], edgecolor="white", linewidth=0.5)
+
+        # Add value labels on bars
+        for bar, acc in zip(bars, accuracies):
+            if acc > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                        f"{acc:.0%}", ha="center", va="bottom", fontsize=7)
+
+    ax.set_xlabel("Stage")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_title("Per-Stage Classification Accuracy")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(stages_with_data, rotation=30, ha="right")
+    ax.set_ylim(0, 105)
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"\nChart saved to: {output_path}")
+
+
 def print_results(results: dict[str, dict]):
     """Print results table."""
     from perception._base import STAGES
@@ -380,6 +449,7 @@ async def main():
 
     if completed:
         print_results(completed)
+        plot_results(completed, RESULTS_DIR / f"chart{stage_suffix}.png")
 
 
 if __name__ == "__main__":
