@@ -1,0 +1,375 @@
+\documentclass[11pt, a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{amsmath, amssymb}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{multirow}
+\usepackage{graphicx}
+
+\graphicspath{{figures/}}
+
+\definecolor{accentblue}{HTML}{2563EB}
+\definecolor{muted}{HTML}{64748B}
+\definecolor{neg}{HTML}{DC2626}
+\definecolor{pos}{HTML}{16A34A}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accentblue,
+  urlcolor=accentblue,
+  citecolor=accentblue,
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\sffamily}{\thesection.}{0.5em}{}[\vspace{-4pt}\rule{\textwidth}{0.4pt}]
+\titleformat{\subsection}{\normalsize\bfseries\sffamily}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
+
+\title{%
+  \sffamily\bfseries
+  Annexure~2: Multi-Shot Reconsideration Experiment\\[4pt]
+  \Large Effect of Conversational Follow-Up on\\
+  VLM-Based Embryo Stage Classification
+}
+\author{%
+  Gently Project, Shroff Lab, Janelia Research Campus
+}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We test whether multi-turn conversational reconsideration improves VLM-based
+developmental stage classification.  After an initial single-shot classification,
+a follow-up prompt asks the model to re-examine the image and confirm or revise
+its answer, while retaining the full conversation context (reference images,
+initial reasoning, and the current image).
+
+The result is unambiguously negative.  Multi-shot reconsideration reduces exact
+accuracy by 32--36 percentage points across two prompt variants (minimal: 48.5\%
+$\to$ 12.7\%; descriptive: 48.0\% $\to$ 15.5\%).  The model systematically
+interprets the reconsideration prompt as implicit negative feedback, changing
+correct answers to incorrect ones.  Early-stage classification is most severely
+affected (98\% $\to$ 5--6\%), but no stage benefits reliably from reconsideration.
+\end{abstract}
+
+% ═══════════════════════════════════════════════════════════════
+\section{Motivation}
+% ═══════════════════════════════════════════════════════════════
+
+Single-shot VLM classification of \emph{C.~elegans} developmental stages
+achieves $\sim$48\% exact accuracy with both minimal and descriptive prompt
+variants.  Accuracy varies widely by stage: early (98\%), bean (46--75\%), 2-fold
+(46--82\%), but pretzel (29--33\%) and 1.5-fold (12--18\%) remain challenging.
+
+A natural hypothesis is that the model might improve if given a chance to
+reconsider---analogous to ``think again'' or chain-of-verification approaches in
+LLM reasoning.  By continuing the conversation after the initial prediction, the
+model retains access to:
+
+\begin{itemize}[nosep]
+  \item All reference stage images (cached in the first user message)
+  \item Its own initial classification and reasoning
+  \item The current embryo image
+  \item Temporal context from previous timepoints
+\end{itemize}
+
+The follow-up prompt is intentionally neutral: it asks the model to ``carefully
+re-examine the image'' and states that ``it's OK to change your answer.''  No
+tools are provided on the reconsideration turn (to avoid unnecessary token cost).
+
+% ═══════════════════════════════════════════════════════════════
+\section{Experimental Setup}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Variants}
+
+Four variants were compared, all using \texttt{claude-sonnet-4-5} at
+temperature~0.0:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llcl@{}}
+\toprule
+\textbf{Variant} & \textbf{Prompt style} & \textbf{Turns} & \textbf{Tools} \\
+\midrule
+Minimal (baseline)         & Stage names only         & 1 & None \\
+Descriptive (baseline)     & Projection-grounded desc. & 1 & None \\
+Minimal multishot          & Stage names only         & 2 & None \\
+Descriptive multishot      & Projection-grounded desc. & 2 & None \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Reconsideration prompt}
+
+After the initial classification, the following follow-up message is appended to
+the conversation:
+
+\begin{quote}\small\ttfamily
+You classified this as \{stage\} with \{confidence\} confidence.
+Before I accept this, please carefully re-examine the image.
+
+Look specifically at:\\
+1. The key morphological features that distinguish this stage from adjacent stages\\
+2. Whether your observation matches the reference examples above\\
+3. All available views --- not just the primary one
+
+After re-examining, provide your revised (or confirmed) classification
+in the same JSON format. It's OK to change your answer.
+\end{quote}
+
+The prompt is designed to be neutral---it does not suggest any particular
+direction of change.  The model's initial response is included as an assistant
+message so the full conversation context is available.
+
+\subsection{Dataset}
+
+The same offline testset as the prompt ablation experiment:
+4~embryos, 769~timepoints total, session \texttt{59799c78}.
+Ground truth annotations by a biologist (transition-timepoint format).
+
+% ═══════════════════════════════════════════════════════════════
+\section{Results}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Overall accuracy}
+
+\begin{center}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Variant} & \textbf{Exact} & \textbf{$\Delta$} & \textbf{Adjacent} & \textbf{Conf.} & \textbf{ECE} \\
+\midrule
+Minimal (1-shot)      & 48.5\% & ---           & 65.4\% & 0.84 & --- \\
+Minimal multishot     & 12.7\% & \textcolor{neg}{$-$35.8pp} & 34.7\% & 0.84 & 0.718 \\
+\addlinespace
+Descriptive (1-shot)  & 48.0\% & ---           & 65.1\% & 0.82 & --- \\
+Descriptive multishot & 15.5\% & \textcolor{neg}{$-$32.5pp} & 47.1\% & 0.83 & 0.691 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Multi-shot reconsideration reduces exact accuracy by 32--36 percentage points.
+Adjacent accuracy drops by 18--31 percentage points.  Mean confidence remains
+high ($\sim$0.83--0.84), indicating the model is confidently wrong after
+reconsideration.
+
+\subsection{Per-stage accuracy}
+
+\begin{center}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{Minimal}} & \multicolumn{3}{c}{\textbf{Descriptive}} \\
+\cmidrule(lr){2-4} \cmidrule(l){5-7}
+\textbf{Stage} & \textbf{1-shot} & \textbf{Multi} & \textbf{$\Delta$} & \textbf{1-shot} & \textbf{Multi} & \textbf{$\Delta$} \\
+\midrule
+early    & 98\% &  6\% & \textcolor{neg}{$-$92pp} & 98\% &  5\% & \textcolor{neg}{$-$93pp} \\
+bean     & 75\% &  0\% & \textcolor{neg}{$-$75pp} & 46\% &  0\% & \textcolor{neg}{$-$46pp} \\
+comma    & 22\% &  4\% & \textcolor{neg}{$-$18pp} & 56\% & 48\% & \textcolor{neg}{$-$8pp}  \\
+1.5-fold & 12\% &  0\% & \textcolor{neg}{$-$12pp} & 18\% &  4\% & \textcolor{neg}{$-$14pp} \\
+2-fold   & 82\% & 22\% & \textcolor{neg}{$-$60pp} & 46\% & 61\% & \textcolor{pos}{$+$15pp} \\
+pretzel  & 29\% & 16\% & \textcolor{neg}{$-$13pp} & 33\% & 11\% & \textcolor{neg}{$-$22pp} \\
+\midrule
+\textit{N} & \multicolumn{3}{c}{769} & \multicolumn{3}{c}{769} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Only one cell shows improvement: descriptive multishot on 2-fold
+($+$15\,pp).  Every other stage--variant combination is worse, often
+catastrophically so.
+
+% ═══════════════════════════════════════════════════════════════
+\section{Analysis}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{The ``implicit negative feedback'' effect}
+
+The dominant failure mode is clear: the model interprets ``please carefully
+re-examine'' as a signal that its first answer was wrong, even though the prompt
+explicitly states that confirming the original answer is acceptable.
+
+This manifests as:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Early $\to$ later stage shift.}  The model changes correct
+    ``early'' predictions to bean, comma, 1.5-fold, or beyond.  In the minimal
+    multishot confusion matrix, only 9 of 157 early-stage timepoints are
+    correctly classified (vs.\ 154 in single-shot).  The model distributes
+    predictions across all later stages.
+
+  \item \textbf{Bean stage elimination.}  Bean achieves 0\% accuracy in both
+    multishot variants---the model always ``upgrades'' bean to a later stage on
+    reconsideration.
+
+  \item \textbf{Confabulated morphological features.}  The model's reconsideration
+    reasoning contains hallucinated observations: ``clear elongation and a
+    bean-like shape'' or ``asymmetric curvature characteristic of the comma
+    stage'' for images that are unambiguously early-stage (round, uniform
+    blastomeres with no morphological differentiation).
+\end{enumerate}
+
+\subsection{Directional bias}
+
+The prediction shift is almost exclusively toward later (more morphologically
+complex) stages.  When asked to ``look more carefully,'' the model appears to
+search for features that would justify a more specific classification, finding
+pattern-matching artifacts that do not correspond to real developmental features.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Shift direction} & \textbf{Minimal} & \textbf{Descriptive} \\
+\midrule
+Earlier $\to$ later (net wrong)     & dominant & dominant \\
+Later $\to$ earlier (net wrong)     & rare     & rare \\
+Same answer confirmed               & minority & minority \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This asymmetry suggests the model has a prior that ``looking more carefully''
+should reveal additional structure, biasing it toward later developmental stages
+that have more distinctive morphology.
+
+\subsection{Comparison with verification subagents}
+
+The production perception engine includes a verification mechanism that spawns
+parallel subagents for binary stage comparisons (e.g., ``Is this 2-fold or
+pretzel?'').  That approach was also found to hurt accuracy in the baseline
+experiment (23\% with tools vs.\ 35\% without).  The multi-shot result is
+consistent: \textbf{asking the same model to second-guess itself---whether via
+tools, subagents, or follow-up prompts---systematically degrades performance on
+this task.}
+
+% ═══════════════════════════════════════════════════════════════
+\section{Conclusion}
+% ═══════════════════════════════════════════════════════════════
+
+Multi-turn reconsideration with a generic ``are you sure?''\ prompt does not
+improve VLM-based embryo classification.  The model treats conversational
+follow-up as implicit negative feedback, changing correct answers with high
+confidence.
+
+This finding has implications beyond microscopy:
+
+\begin{itemize}[nosep]
+  \item \textbf{VLM self-consistency is fragile for visual classification.}
+    Unlike reasoning tasks where chain-of-thought can improve accuracy,
+    perceptual classification appears to degrade with deliberation pressure.
+
+  \item \textbf{``Are you sure?'' is a biased prompt.}  Even when phrased
+    neutrally, the act of asking for reconsideration carries implicit
+    information that the first answer may be wrong.
+
+  \item \textbf{First impressions may be best.}  For morphological
+    classification tasks, the model's initial gestalt recognition may be more
+    reliable than its ability to reason analytically about specific features
+    on demand.
+\end{itemize}
+
+Future work could explore \textbf{independent multi-sample} approaches
+(multiple separate classifications with majority vote) rather than
+\textbf{sequential reconsideration}, which avoids the implicit negative feedback
+problem.
+
+% ═══════════════════════════════════════════════════════════════
+\appendix
+\section{Confusion Matrices}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection*{A.1 Minimal Multishot}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+& \multicolumn{8}{c}{\textbf{Predicted}} \\
+\cmidrule(l){2-9}
+\textbf{True} & early & bean & comma & 1.5f & 2f & pretzel & hatching & hatched \\
+\midrule
+early    & \textbf{9} & 10 & 13 & 16 & 56 & 39 & 12 & 2 \\
+bean     & -- & \textbf{0} & 1 & -- & 7 & 10 & 4 & 2 \\
+comma    & -- & -- & \textbf{1} & 1 & 16 & 9 & -- & -- \\
+1.5-fold & -- & -- & -- & \textbf{0} & 22 & 21 & 6 & -- \\
+2-fold   & -- & -- & -- & -- & \textbf{17} & 31 & 30 & 1 \\
+pretzel  & 210 & 14 & 4 & -- & 36 & \textbf{71} & 68 & 30 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{A.2 Descriptive Multishot}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+& \multicolumn{8}{c}{\textbf{Predicted}} \\
+\cmidrule(l){2-9}
+\textbf{True} & early & bean & comma & 1.5f & 2f & pretzel & hatching & hatched \\
+\midrule
+early    & \textbf{8} & 17 & 92 & 7 & 14 & 16 & -- & 3 \\
+bean     & -- & \textbf{0} & 21 & 1 & 1 & 1 & -- & -- \\
+comma    & -- & -- & \textbf{13} & 1 & 9 & 4 & -- & -- \\
+1.5-fold & -- & -- & 15 & \textbf{2} & 20 & 12 & -- & -- \\
+2-fold   & -- & -- & 2 & -- & \textbf{48} & 26 & 3 & -- \\
+pretzel  & 234 & 2 & -- & 2 & 123 & \textbf{48} & 20 & 4 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{A.3 Baseline Minimal (1-shot, for comparison)}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+& \multicolumn{8}{c}{\textbf{Predicted}} \\
+\cmidrule(l){2-9}
+\textbf{True} & early & bean & comma & 1.5f & 2f & pretzel & hatching & hatched \\
+\midrule
+early    & \textbf{154} & 3 & -- & -- & -- & -- & -- & -- \\
+bean     & 5 & \textbf{18} & 1 & -- & -- & -- & -- & -- \\
+comma    & -- & 15 & \textbf{6} & 2 & 4 & -- & -- & -- \\
+1.5-fold & -- & 15 & 15 & \textbf{6} & 13 & -- & -- & -- \\
+2-fold   & -- & -- & 7 & 7 & \textbf{65} & -- & -- & -- \\
+pretzel  & 186 & -- & -- & -- & 69 & \textbf{124} & -- & 54 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{A.4 Baseline Descriptive (1-shot, for comparison)}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+& \multicolumn{8}{c}{\textbf{Predicted}} \\
+\cmidrule(l){2-9}
+\textbf{True} & early & bean & comma & 1.5f & 2f & pretzel & hatching & hatched \\
+\midrule
+early    & \textbf{154} & 3 & -- & -- & -- & -- & -- & -- \\
+bean     & 5 & \textbf{11} & 8 & -- & -- & -- & -- & -- \\
+comma    & -- & 12 & \textbf{15} & -- & -- & -- & -- & -- \\
+1.5-fold & -- & 18 & 22 & \textbf{9} & -- & -- & -- & -- \\
+2-fold   & -- & -- & 10 & 14 & \textbf{36} & 19 & -- & -- \\
+pretzel  & 82 & -- & -- & -- & 49 & \textbf{144} & -- & 158 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
