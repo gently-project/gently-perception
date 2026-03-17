@@ -35,7 +35,14 @@ python run.py --variant my_variant --force
 
 Using `claude-opus-4-6` (set in `perception/_base.py`).
 
-## Current Baselines (from Sonnet 4.5 — re-run with Opus for updated numbers)
+## Current Results (Opus 4.6, hard stages only, corrected annotations)
+
+| Variant | Exact | Adjacent | Pretzel (n=193) | 2fold (n=79) | 1.5fold (n=49) |
+|---------|-------|----------|-----------------|--------------|----------------|
+| **scientific** | **82.6%** | 100% | 92% | **76%** | 55% |
+| temporal | 81.0% | 100% | **95%** | 58% | **63%** |
+
+### Old Baselines (Sonnet 4.5, before annotation fix)
 
 | Variant | Exact | Pretzel (n=433) | 2fold (n=79) | 1.5fold (n=49) |
 |---------|-------|-----------------|--------------|----------------|
