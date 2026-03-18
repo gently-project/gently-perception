@@ -40,6 +40,7 @@ def get_functions() -> dict:
     from .ensemble import perceive_ensemble
     from .compare import perceive_compare
     from .changegate import perceive_changegate
+    from .duration_aware import perceive_duration_aware
 
     _FUNCTIONS = {
         "minimal": perceive_minimal,
@@ -56,5 +57,6 @@ def get_functions() -> dict:
         "ensemble": perceive_ensemble,
         "compare": perceive_compare,
         "changegate": perceive_changegate,
+        "duration_aware": perceive_duration_aware,
     }
     return _FUNCTIONS
