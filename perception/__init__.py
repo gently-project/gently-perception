@@ -38,6 +38,8 @@ def get_functions() -> dict:
     from .hybrid import perceive_hybrid
     from .unified import perceive_unified
     from .ensemble import perceive_ensemble
+    from .compare import perceive_compare
+    from .changegate import perceive_changegate
 
     _FUNCTIONS = {
         "minimal": perceive_minimal,
@@ -52,5 +54,7 @@ def get_functions() -> dict:
         "hybrid": perceive_hybrid,
         "unified": perceive_unified,
         "ensemble": perceive_ensemble,
+        "compare": perceive_compare,
+        "changegate": perceive_changegate,
     }
     return _FUNCTIONS
