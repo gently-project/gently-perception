@@ -1,69 +1,118 @@
 # gently-perception
 
-VLM-based perception for microscopy stage classification — an autoresearch-style experiment framework.
+VLM-based perception for microscopy stage classification — an [autoresearch](https://github.com/karpathy/autoresearch)-style experiment framework.
 
-A coding agent modifies perception functions, runs experiments against a fixed benchmark, and iterates to improve accuracy. AI developing AI perception.
+A coding agent modifies perception functions, runs experiments against a fixed benchmark, and iterates to improve accuracy. The framework is inspired by Karpathy's autoresearch pattern: `program.md` instructs the agent, perception functions are the "model" the agent tunes, and the benchmark harness is fixed infrastructure. See `program.md` for the full agent instructions and experiment history.
 
 ## Quick Start
 
 ```bash
-# 1. Symlink your volume data
-ln -s /path/to/59799c78/volumes data/volumes
+# 1. Clone and install dependencies
+git clone <repo-url>
+cd gently-perception
+pip install -r requirements.txt
 
-# 2. Set your API key
+# 2. Download volume data from HuggingFace (~35 GB)
+python setup_data.py
+
+# 3. Set your Anthropic API key
 export ANTHROPIC_API_KEY=sk-...
 
-# 3. Run a quick experiment
-python run.py --variant minimal --quick
+# 4. Run an experiment
+python run.py --variant hybrid --stages pretzel 2fold 1.5fold --force
 ```
 
-## Structure
+## Results
+
+Accuracy on hard stages (1.5fold, 2fold, pretzel) using Claude Opus 4.6.
+All variants achieve 100% adjacent accuracy (within 1 stage of ground truth).
+
+| Variant | Exact | 1.5fold (n=49) | 2fold (n=79) | Pretzel (n=193) | Approach |
+|---------|-------|----------------|--------------|-----------------|----------|
+| **hybrid** | **83.2%** | 59% | 70% | 95% | Stage-adaptive prompt switching |
+| scientific | 82.6% | 55% | 76% | 92% | Eggshell fill fraction + body segment counting |
+| temporal | 81.0% | 63% | 58% | 95% | Soft temporal anchoring, "prefer earlier stage" |
+| duration_aware | 81.3% | 65% | 77% | 87% | Duration-aware prior + confidence-gated transitions |
+| unified | 78.8% | 53% | 67% | 90% | Merged temporal + scientific (single prompt) |
+| ensemble | 79.8% | 57% | 59% | 94% | 3x majority vote with temperature=0.3 |
+| compare | 52.0% | 63% | 57% | 47% | Previous timepoint image comparison |
+| contrastive | — | 25% | 30% | — | Detailed transition descriptions (aborted) |
+| minimal | 48.5%\* | 12% | 82% | 29% | Stage names only (Sonnet 4.5 baseline) |
+| descriptive | 48.0%\* | 18% | 46% | 33% | Projection-grounded descriptions (Sonnet 4.5 baseline) |
+
+\* Sonnet 4.5 baselines measured on all stages (n=769), not directly comparable.
+
+### Key Findings
+
+- **Temporal anchoring** ("prefer earlier stage when uncertain") was the single biggest prompt improvement
+- **Eggshell fill fraction** is the most discriminative visual criterion for fold stages
+- **Annotation quality matters**: adding `hatched` transitions to ground truth improved measured accuracy by +35pp
+- **Ensemble/majority voting doesn't help**: boundary errors are systematic, not stochastic
+- **Previous image comparison** helps 1.5fold but catastrophically hurts pretzel (embryo movement ≠ stage change)
+- **Duration-aware priors** improve boundary accuracy but trade off pretzel retention
+
+## Key Commands
+
+```bash
+# Evaluate on hard stages only (fast, ~30 min)
+python run.py --variant hybrid --stages pretzel 2fold 1.5fold --force
+
+# Quick full eval (30 timepoints per embryo, ~5 min)
+python run.py --variant hybrid --quick --force
+
+# Full eval (all timepoints, ~1 hour)
+python run.py --variant hybrid --force
+
+# Generate filmstrip viewer for manual annotation review
+python make_filmstrip.py
+# Then open data/filmstrip/viewer.html
+```
+
+## Adding a New Variant
+
+1. Create `perception/my_variant.py` with the standard signature:
+   ```python
+   async def perceive_my_variant(
+       image_b64: str,
+       references: dict[str, list[str]],
+       history: list[dict],
+       timepoint: int,
+   ) -> PerceptionOutput:
+   ```
+2. Register it in `perception/__init__.py`
+3. Run: `python run.py --variant my_variant --stages pretzel 2fold 1.5fold --force`
+
+See `program.md` for detailed instructions, failed experiments, and promising directions.
+
+## Project Structure
 
 ```
 gently-perception/
-├── program.md           # Instructions for the coding agent
-├── run.py               # Evaluation entry point (fixed)
-├── perception/          # Perception functions (agent modifies these)
-│   ├── _base.py         # Shared utilities (fixed)
-│   ├── minimal.py       # Baseline: stage names only
-│   ├── descriptive.py   # Baseline: projection-grounded descriptions
-│   └── ...              # New variants go here
-├── benchmark/           # Evaluation harness (fixed)
-│   ├── testset.py       # Volume loading + projection
-│   ├── ground_truth.py  # Annotation parsing
-│   └── metrics.py       # Accuracy, ECE, confusion matrices
+├── perception/           # Perception functions (modify these)
+│   ├── _base.py          # Shared utilities: API wrapper, parsing (fixed)
+│   ├── hybrid.py         # Best variant: stage-adaptive prompt switching
+│   ├── scientific.py     # Eggshell fill + body segment counting
+│   ├── temporal.py       # Temporal anchoring + reference matching
+│   ├── duration_aware.py # Duration-aware confidence gating
+│   └── ...               # 10+ other variants
+├── benchmark/            # Evaluation harness (fixed)
+│   ├── testset.py        # Volume loading, 3-view projections
+│   ├── ground_truth.py   # Stage transition annotations
+│   └── metrics.py        # Accuracy computation
 ├── data/
-│   ├── ground_truth/    # Stage transition annotations
-│   ├── examples/        # Reference stage images
-│   ├── volumes/         # 3D microscopy data (symlink)
-│   └── results/         # Experiment outputs
-└── paper/               # Experiment write-ups
+│   ├── ground_truth/     # Stage annotations (JSON)
+│   ├── examples/         # Reference images per stage
+│   ├── volumes/          # 3D light-sheet data (downloaded via setup_data.py)
+│   └── results/          # Experiment outputs (JSON + charts)
+├── run.py                # Evaluation entry point
+├── setup_data.py         # Download data from HuggingFace
+├── make_filmstrip.py     # Generate HTML filmstrip viewer
+├── program.md            # Agent instructions (autoresearch-style)
+├── requirements.txt      # Python dependencies
+└── CLAUDE.md             # Current state for coding agent
 ```
-
-## How It Works
-
-Like [autoresearch](https://github.com/karpathy/autoresearch), but for VLM perception:
-
-| autoresearch | gently-perception |
-|---|---|
-| `train.py` (agent modifies) | `perception/*.py` |
-| `prepare.py` (fixed) | `benchmark/`, `_base.py` |
-| `program.md` (instructions) | `program.md` |
-| val_bpb metric | exact accuracy |
-| 5-min GPU training | `--quick` benchmark (~2 min) |
-
-## Current Results
-
-| Variant | Exact | Adjacent | N |
-|---|---|---|---|
-| minimal | 48.5% | 65.4% | 769 |
-| descriptive | 48.0% | 65.1% | 769 |
-| minimal_multishot | 12.7% | 34.7% | 769 |
-| descriptive_multishot | 15.5% | 47.1% | 769 |
-
-See `program.md` for what's been tried and what to explore next.
 
 ## Related
 
 - [gently](https://github.com/shrofflab/gently) — the microscopy agent framework
-- [autoresearch](https://github.com/karpathy/autoresearch) — inspiration for this framework
+- [autoresearch](https://github.com/karpathy/autoresearch) — inspiration for this framework pattern
