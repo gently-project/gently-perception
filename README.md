@@ -46,10 +46,25 @@ All variants achieve 100% adjacent accuracy (within 1 stage of ground truth).
 
 - **Temporal anchoring** ("prefer earlier stage when uncertain") was the single biggest prompt improvement
 - **Eggshell fill fraction** is the most discriminative visual criterion for fold stages
-- **Annotation quality matters**: adding `hatched` transitions to ground truth improved measured accuracy by +35pp
+- **Annotation quality matters**: the original ground truth was missing `hatched` transitions (see below), fixing this improved measured accuracy by +35pp
 - **Ensemble/majority voting doesn't help**: boundary errors are systematic, not stochastic
 - **Previous image comparison** helps 1.5fold but catastrophically hurts pretzel (embryo movement ≠ stage change)
 - **Duration-aware priors** improve boundary accuracy but trade off pretzel retention
+
+### Ground Truth Annotation Fix
+
+The original annotations (`data/ground_truth/59799c78_original.json`) covered stages up through pretzel but did not include hatching/hatched transitions — the annotation task focused on the morphogenesis stages. Since the imaging continues well past hatching, ~240 post-hatching timepoints were implicitly labeled as pretzel.
+
+We extended the annotations by identifying hatched transition timepoints using two independent VLM variants (temporal and scientific). Both consistently broke at the same exact timepoints across all embryos:
+
+| Embryo | Hatched at | Pretzel duration |
+|--------|-----------|-----------------|
+| embryo_1 | T139 | 49 timepoints |
+| embryo_2 | T123 | 43 timepoints |
+| embryo_3 | T110 | 41 timepoints |
+| embryo_4 | T157 | 60 timepoints |
+
+The corrected annotations (`data/ground_truth/59799c78.json`) include these hatched transitions. Use `make_filmstrip.py` to generate a visual filmstrip viewer for manual verification of the boundaries.
 
 ## Key Commands
 

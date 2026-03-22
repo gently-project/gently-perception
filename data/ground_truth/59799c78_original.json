@@ -1,7 +1,7 @@
 {
   "session_id": "59799c78",
   "annotator": "Ryan",
-  "notes": "Annotations from December 2024 (stages through pretzel). Hatched transitions added March 2026 based on consistent VLM classification breakpoints — two independent prompt variants agree on the exact transition timepoints for all four embryos.",
+  "notes": "Original annotations from December 2024. Covers stages through pretzel; hatching/hatched transitions were not part of the original annotation task. See 59799c78.json for extended version with hatched transitions added.",
   "transitions": {
     "embryo_1": {
       "early": 0,
@@ -9,8 +9,7 @@
       "comma": 49,
       "1.5fold": 55,
       "2fold": 70,
-      "pretzel": 90,
-      "hatched": 139
+      "pretzel": 90
     },
     "embryo_2": {
       "early": 0,
@@ -18,8 +17,7 @@
       "comma": 39,
       "1.5fold": 45,
       "2fold": 60,
-      "pretzel": 80,
-      "hatched": 123
+      "pretzel": 80
     },
     "embryo_3": {
       "early": 0,
@@ -27,8 +25,7 @@
       "comma": 33,
       "1.5fold": 39,
       "2fold": 50,
-      "pretzel": 69,
-      "hatched": 110
+      "pretzel": 69
     },
     "embryo_4": {
       "early": 0,
@@ -36,8 +33,7 @@
       "comma": 60,
       "1.5fold": 69,
       "2fold": 77,
-      "pretzel": 97,
-      "hatched": 157
+      "pretzel": 97
     }
   }
 }
