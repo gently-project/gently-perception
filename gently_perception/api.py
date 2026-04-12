@@ -172,6 +172,7 @@ def response_to_output(raw: str) -> PerceptionOutput:
     return PerceptionOutput(
         stage=stage,
         reasoning=data.get("reasoning", ""),
+        confidence=float(data.get("confidence", 0.0)),
         raw_response=raw,
     )
 
