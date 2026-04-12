@@ -29,14 +29,7 @@ python run.py --variant hybrid --stages pretzel 2fold 1.5fold --force
 
 ## Results
 
-Accuracy on hard stages (1.5fold, 2fold, pretzel) using Claude Opus 4.6.
-
-| Variant | Exact | 1.5fold (n=49) | 2fold (n=79) | Pretzel (n=193) | Approach |
-|---------|-------|----------------|--------------|-----------------|----------|
-| **hybrid** | **83.2%** | 59% | 70% | 95% | Stage-adaptive prompt switching |
-| scientific | 82.6% | 55% | 76% | 92% | Eggshell fill fraction + body segment counting |
-| temporal | 81.0% | 63% | 58% | 95% | Soft temporal anchoring |
-| duration_aware | 81.3% | 65% | 77% | 87% | Duration-aware priors |
+The best prompt experiment (hybrid) achieves **83.2%** exact accuracy on hard stages. See [experiments/prompt/README.md](experiments/prompt/README.md) for the full results table, variant descriptions, and key findings.
 
 ## Architecture
 
@@ -94,13 +87,6 @@ gently-perception/
 2. Run: `cd experiments && python run.py --variant my_experiment --stages pretzel 2fold 1.5fold --force`
 
 See `experiments/program.md` for detailed experiment history and promising directions.
-
-## Key Findings
-
-- **Temporal anchoring** ("prefer earlier stage when uncertain") was the single biggest prompt improvement
-- **Eggshell fill fraction** is the most discriminative visual criterion for fold stages
-- **VLM self-reported confidence is noise** (0.867 correct vs 0.857 wrong) — reliability is derived from session history instead
-- **Ensemble/majority voting doesn't help**: boundary errors are systematic, not stochastic
 
 ## Related
 
