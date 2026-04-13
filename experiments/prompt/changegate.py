@@ -87,6 +87,7 @@ async def perceive_changegate(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Change-gated classification: only reclassify when morphology changes."""
     global _prev_image, _prev_timepoint

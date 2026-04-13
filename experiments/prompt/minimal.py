@@ -36,6 +36,7 @@ async def perceive_minimal(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Single API call with minimal prompt text and reference images."""
     # Build user content: references (cached) + history + current image
