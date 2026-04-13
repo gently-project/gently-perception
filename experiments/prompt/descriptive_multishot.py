@@ -33,6 +33,7 @@ async def perceive_descriptive_multishot(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Descriptive prompt with one reconsideration turn."""
     content = build_reference_content(references)

@@ -83,6 +83,7 @@ async def perceive_scientific(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Scientific criteria with temporal anchoring."""
     content = build_reference_content(references)

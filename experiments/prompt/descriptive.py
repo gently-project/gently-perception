@@ -43,6 +43,7 @@ async def perceive_descriptive(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Single API call with descriptive stage definitions and reference images."""
     content = build_reference_content(references)
