@@ -46,6 +46,7 @@ async def perceive_compare(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Classification with previous timepoint image comparison."""
     global _prev_image, _prev_timepoint

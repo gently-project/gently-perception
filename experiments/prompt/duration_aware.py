@@ -171,6 +171,7 @@ async def perceive_duration_aware(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Duration-aware classification with confidence-gated transitions."""
     global _current_stage, _stage_entry_tp, _prev_timepoint, _is_first_evaluated_tp

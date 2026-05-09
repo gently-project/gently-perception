@@ -33,6 +33,7 @@ async def perceive_minimal_multishot(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Minimal prompt with one reconsideration turn."""
     # Build user content: references (cached) + history + current image

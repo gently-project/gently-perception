@@ -33,6 +33,7 @@ async def perceive_ensemble(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Majority-vote ensemble using hybrid's stage-adaptive prompts."""
     # Determine expected stage from history (same logic as hybrid)
