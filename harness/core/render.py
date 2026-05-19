@@ -42,12 +42,20 @@ DEFAULT_PARAMS = RenderParams()
 
 
 def load_volume(path: Path) -> np.ndarray:
-    """Load a 3D volume from TIFF or NPZ. Returns (Z, Y, X) uint16/float array."""
+    """Load a 3D (Z, Y, X) volume from TIFF or NPZ.
+
+    Real Shroff-lab TIFFs are (1, Z, Y, X) — leading singleton dims are squeezed.
+    """
     path = Path(path)
     if path.suffix == ".npz":
         with np.load(path) as f:
-            return f[f.files[0]]
-    return tifffile.imread(path)
+            arr = f[f.files[0]]
+    else:
+        arr = tifffile.imread(path)
+    while arr.ndim > 3 and arr.shape[0] == 1:
+        arr = arr[0]
+    assert arr.ndim == 3, f"expected 3D volume after squeeze, got {arr.shape}"
+    return arr
 
 
 def normalize(arr: np.ndarray, *, p_low: float = 1.0, p_high: float = 99.5) -> np.ndarray:

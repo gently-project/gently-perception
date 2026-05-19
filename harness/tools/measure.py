@@ -42,13 +42,21 @@ def _fill_fraction(volume: np.ndarray) -> tuple[float, str]:
 
 
 def _n_segments(volume: np.ndarray) -> tuple[float, str]:
-    """Count of connected bright components in the XY projection — fold-count proxy."""
+    """Count of connected bright components in the XY projection — fold-count proxy.
+
+    Components smaller than 0.5% of the foreground are discarded as noise.
+    """
     proj = project_axis(volume, "xy")
     mask = _otsu_mask(proj)
     if not mask.any():
         return 0.0, "no signal detected"
-    _, n = ndimage.label(mask)  # type: ignore[misc]
-    return float(n), "connected foreground components on XY max-projection"
+    labeled, n = ndimage.label(mask)  # type: ignore[misc]
+    if n == 0:
+        return 0.0, "no signal detected"
+    sizes = ndimage.sum(mask, labeled, range(1, n + 1))
+    min_size = max(20, int(mask.sum() * 0.005))
+    n_real = int(np.sum(sizes >= min_size))
+    return float(n_real), f"connected components ≥{min_size}px on XY max-projection"
 
 
 def _aspect_ratio(volume: np.ndarray) -> tuple[float, str]:
