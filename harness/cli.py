@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--verify", default="monotonic", choices=["none", "monotonic"])
     pe.add_argument("--accept-drift", action="store_true")
     pe.add_argument("--update-baseline", action="store_true")
+    pe.add_argument("--concurrency", type=int, default=4, help="parallel embryo sessions")
 
     ps = sub.add_parser("score", help="score an existing events.jsonl")
     ps.add_argument("events", type=Path)
@@ -53,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                 verifier_name=args.verify,
                 accept_drift=args.accept_drift,
                 update_baseline=args.update_baseline,
+                concurrency=args.concurrency,
             )
         )
         return 0

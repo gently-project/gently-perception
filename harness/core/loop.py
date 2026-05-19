@@ -79,6 +79,35 @@ async def step(
     return corrected
 
 
+async def _run_embryo(
+    embryo_id: str,
+    frames: list[tuple[int, Path]],
+    solver: Solver,
+    *,
+    refs: Mapping[Stage, tuple[str, ...]],
+    verifier: verify.Verifier,
+    on_event: Callable[[Event], None],
+) -> list[tuple[FrameInput, Prediction]]:
+    """Sequential per-embryo loop — history must accumulate frame by frame."""
+    history: list[Observation] = []
+    prev_paths: list[Path] = []
+    results: list[tuple[FrameInput, Prediction]] = []
+    for timepoint, volume_path in frames:
+        hist = tuple(history)
+        pp = tuple(reversed(prev_paths[-PREV_FRAMES_KEPT:]))
+        frame = build_frame(embryo_id, timepoint, volume_path, refs=refs, history=hist, prev_paths=pp)
+        try:
+            pred = await step(frame, solver, verifier=verifier, on_event=on_event)
+        except ModelOutputError as e:
+            on_event(Event.error(embryo_id, timepoint, str(e)))
+            prev_paths.append(volume_path)
+            continue
+        history.append(Observation(timepoint, pred.stage, now()))
+        prev_paths.append(volume_path)
+        results.append((frame, pred))
+    return results
+
+
 async def run_loop(
     source: Iterable[tuple[str, int, Path]],
     solver: Solver,
@@ -86,24 +115,35 @@ async def run_loop(
     refs: Mapping[Stage, tuple[str, ...]],
     verifier: verify.Verifier = verify.monotonic,
     on_event: Callable[[Event], None] = agent._noop,
+    concurrency: int = 1,
 ) -> AsyncIterator[tuple[FrameInput, Prediction]]:
     """Iterate frames in order, maintaining per-embryo predicted history.
 
     `source` yields (embryo_id, timepoint, volume_path) — never ground truth.
+    Embryo sessions are independent, so with concurrency>1 they run in parallel
+    (each embryo's frames stay sequential — history must accumulate in order).
     """
-    sessions: dict[str, list[Observation]] = {}
-    prev_paths: dict[str, list[Path]] = {}
+    import asyncio
 
+    by_embryo: dict[str, list[tuple[int, Path]]] = {}
     for embryo_id, timepoint, volume_path in source:
-        hist = tuple(sessions.get(embryo_id, []))
-        pp = tuple(reversed(prev_paths.get(embryo_id, [])[-PREV_FRAMES_KEPT:]))
-        frame = build_frame(embryo_id, timepoint, volume_path, refs=refs, history=hist, prev_paths=pp)
-        try:
-            pred = await step(frame, solver, verifier=verifier, on_event=on_event)
-        except ModelOutputError as e:
-            on_event(Event.error(embryo_id, timepoint, str(e)))
-            prev_paths.setdefault(embryo_id, []).append(volume_path)
-            continue
-        sessions.setdefault(embryo_id, []).append(Observation(timepoint, pred.stage, now()))
-        prev_paths.setdefault(embryo_id, []).append(volume_path)
-        yield frame, pred
+        by_embryo.setdefault(embryo_id, []).append((timepoint, volume_path))
+
+    if concurrency <= 1:
+        for embryo_id, frames in by_embryo.items():
+            for fr, pred in await _run_embryo(
+                embryo_id, frames, solver, refs=refs, verifier=verifier, on_event=on_event
+            ):
+                yield fr, pred
+        return
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _bounded(eid: str, frames: list) -> list:
+        async with sem:
+            return await _run_embryo(eid, frames, solver, refs=refs, verifier=verifier, on_event=on_event)
+
+    tasks = [asyncio.create_task(_bounded(eid, fr)) for eid, fr in by_embryo.items()]
+    for results in await asyncio.gather(*tasks):
+        for fr, pred in results:
+            yield fr, pred

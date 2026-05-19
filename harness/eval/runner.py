@@ -55,6 +55,7 @@ async def run(
     update_baseline: bool = False,
     volumes_dir: Path | None = None,
     gt_path: Path | None = None,
+    concurrency: int = 4,
 ) -> dict:
     solver, _solver_mod = _load_solver(solver_name)
     gt = GroundTruth.from_json(gt_path or (DATA_DIR / "ground_truth" / "59799c78.json"))
@@ -99,10 +100,14 @@ async def run(
                 )
             )
             n = 0
-            async for frame, pred in loop.run_loop(source, solver, refs=refs, verifier=verifier, on_event=writer):
+            async for frame, pred in loop.run_loop(
+                source, solver, refs=refs, verifier=verifier, on_event=writer, concurrency=concurrency
+            ):
                 n += 1
-                print(f"[{solver_name}/seed{seed}] {frame.embryo_id} T{frame.timepoint}: {pred.stage.value}")
+                if n % 50 == 0:
+                    print(f"[{solver_name}/seed{seed}] {n}/{len(source)} frames")
             writer(Event.run_end({"n_frames": n}))
+            print(f"[{solver_name}/seed{seed}] done: {n} frames")
 
     # Score & aggregate.
     scores = [score.score_run(d / "events.jsonl", gt, stages=stages) for d in seed_dirs]
