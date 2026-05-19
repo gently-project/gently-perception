@@ -24,3 +24,8 @@ paper/*.pdf
 # OS
 .DS_Store
 Thumbs.db
+
+# harness
+runs/
+data/render_cache/
+baseline.lock
