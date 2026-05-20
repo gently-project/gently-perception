@@ -41,17 +41,26 @@ OnEvent = Callable[[Event], None]
 def _noop(_: Event) -> None: ...
 
 
-def _initial_user_block(frame: FrameInput) -> list[dict[str, Any]]:
-    """References (cached) + current image + history text."""
-    content: list[dict[str, Any]] = []
-    for stage, imgs in frame.references.items():
-        content.append(model.text_block(f"Reference — {stage.value}:"))
+def reference_blocks(frame: FrameInput) -> list[dict[str, Any]]:
+    """Cached reference-image prefix. Format matches perception/_base.py:build_reference_content."""
+    from harness.core.types import STAGE_ORDER
+
+    content: list[dict[str, Any]] = [model.text_block("REFERENCE EXAMPLES FOR EACH STAGE:")]
+    for stage in STAGE_ORDER:
+        imgs = frame.references.get(stage)
+        if not imgs:
+            continue
+        content.append(model.text_block(f"\n{stage.value.upper()}"))
         for b64 in imgs:
             content.append(model.image_block(b64))
     if content:
-        content[-1] = model.with_cache(content[-1])  # cache boundary after refs
-    content.append(model.text_block("Current frame:"))
-    content.append(model.image_block(frame.image_b64))
+        content[-1] = model.with_cache(content[-1])
+    return content
+
+
+def _default_user_blocks(frame: FrameInput) -> list[dict[str, Any]]:
+    """Agentic default: image + history + tool-usage hint."""
+    content: list[dict[str, Any]] = [model.text_block("Current frame:"), model.image_block(frame.image_b64)]
     if frame.history_text:
         content.append(model.text_block(frame.history_text))
     content.append(
@@ -61,6 +70,11 @@ def _initial_user_block(frame: FrameInput) -> list[dict[str, Any]]:
         )
     )
     return content
+
+
+def _initial_user_block(frame: FrameInput, solver: Solver) -> list[dict[str, Any]]:
+    blocks = solver.user_blocks or _default_user_blocks
+    return reference_blocks(frame) + blocks(frame)
 
 
 def _tool_result_block(tool_use_id: str, result: ToolResult) -> dict[str, Any]:
@@ -99,7 +113,7 @@ async def react(frame: FrameInput, solver: Solver, on_event: OnEvent = _noop) ->
     """
     volume = None  # lazily loaded on first volume-needing tool
     tool_schemas = get_tool_schemas(solver.tools) + [CLASSIFY_TOOL_SCHEMA]
-    messages: list[dict[str, Any]] = [{"role": "user", "content": _initial_user_block(frame)}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": _initial_user_block(frame, solver)}]
     traj = Trajectory(messages=[m.copy() for m in messages])
 
     for step_i in range(solver.max_steps + 1):

@@ -19,10 +19,11 @@ HISTORY_SHOWN = 3
 
 
 def _fmt_history(hist: tuple[Observation, ...]) -> str:
+    """Matches perception/_base.py:build_history_text minus confidence (dropped as noise)."""
     if not hist:
         return ""
-    lines = [f"T{o.timepoint}: {o.stage.value}" for o in hist[-HISTORY_SHOWN:]]
-    return "Recent observations for this embryo:\n" + "\n".join(lines)
+    lines = ["PREVIOUS OBSERVATIONS:"] + [f"- T{o.timepoint}: {o.stage.value}" for o in hist[-HISTORY_SHOWN:]]
+    return "\n".join(lines)
 
 
 def build_frame(
