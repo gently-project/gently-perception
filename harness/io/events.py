@@ -99,8 +99,24 @@ class Event:
 
     @classmethod
     def tool_call(
-        cls, embryo_id: str, timepoint: int, step: int, name: str, params: dict, result_kind: str
+        cls,
+        embryo_id: str,
+        timepoint: int,
+        step: int,
+        name: str,
+        params: dict,
+        result: Any,
     ) -> "Event":
+        """`result` is a ToolResult. Image payloads are externalized by EventWriter."""
+        payload: dict[str, Any] = {"params": params, "result_kind": result.kind}
+        match result.kind:
+            case "image":
+                payload["image_b64"] = result.b64
+            case "numeric":
+                payload["value"] = result.value
+                payload["note"] = result.note
+            case "error":
+                payload["message"] = result.message
         return cls(
             kind="tool_call",
             ts=time.time(),
@@ -108,7 +124,7 @@ class Event:
             timepoint=timepoint,
             step=step,
             tool_name=name,
-            payload={"params": params, "result_kind": result_kind},
+            payload=payload,
         )
 
     @classmethod
@@ -151,16 +167,42 @@ class Event:
 
 
 class EventWriter:
-    """Append-only JSONL writer. Flushes on every event so a crash mid-run leaves a valid log."""
+    """Append-only JSONL writer. Flushes on every event so a crash mid-run leaves a valid log.
+
+    Image payloads (tool outputs) are externalized to a `media/` directory next
+    to the events file and replaced with a relative `image_path` — the JSONL
+    stays small and the run directory is fully self-describing.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._media_dir = self.path.parent / "media"
         self._fh = self.path.open("a", encoding="utf-8")
 
     def __call__(self, ev: Event) -> None:
+        if "image_b64" in ev.payload:
+            ev = self._externalize(ev)
         self._fh.write(ev.to_json() + "\n")
         self._fh.flush()
+
+    def _externalize(self, ev: Event) -> Event:
+        import base64
+
+        self._media_dir.mkdir(exist_ok=True)
+        fname = f"{ev.embryo_id}_T{ev.timepoint:03d}_s{ev.step}_{ev.tool_name}.jpg"
+        (self._media_dir / fname).write_bytes(base64.b64decode(ev.payload["image_b64"]))
+        payload = {k: v for k, v in ev.payload.items() if k != "image_b64"}
+        payload["image_path"] = f"media/{fname}"
+        return Event(
+            kind=ev.kind,
+            ts=ev.ts,
+            embryo_id=ev.embryo_id,
+            timepoint=ev.timepoint,
+            step=ev.step,
+            tool_name=ev.tool_name,
+            payload=payload,
+        )
 
     def close(self) -> None:
         self._fh.close()

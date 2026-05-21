@@ -121,6 +121,15 @@ async def run(
         baseline.write(lock)
         print(f"baseline.lock updated → {lock.mean:.1%} ± {lock.std:.1%}")
 
+    # Static HTML report — pure reader of the run dir; thumbnails are render-cache hits.
+    from harness.eval.html_report import generate as generate_report
+
+    try:
+        report_path = generate_report(run_dir, gt_path=gt_path, volumes_dir=volumes_dir)
+        print(f"report: file://{report_path.resolve()}")
+    except Exception as e:  # report failure must not fail the eval
+        print(f"⚠ report generation failed: {e}", file=sys.stderr)
+
     error_rate = agg["n_errors"] / max(agg["n"] * n_runs, 1)
     if error_rate > 0.02:
         print(f"✗ error rate {error_rate:.1%} > 2% — run failed.", file=sys.stderr)

@@ -155,7 +155,7 @@ async def react(frame: FrameInput, solver: Solver, on_event: OnEvent = _noop) ->
         result = dispatch(tu.name, dict(tu.input), volume=volume, frame=frame)
         on_event(
             Event.tool_call(
-                frame.embryo_id, frame.timepoint, step_i, tu.name, dict(tu.input), result.kind
+                frame.embryo_id, frame.timepoint, step_i, tu.name, dict(tu.input), result
             )
         )
         traj.steps.append(Step.tool(tu.name, dict(tu.input), result))

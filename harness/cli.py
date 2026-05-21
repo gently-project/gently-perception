@@ -40,6 +40,12 @@ def main(argv: list[str] | None = None) -> int:
     pv.add_argument("events", type=Path)
     pv.add_argument("--frame", required=True, help="embryo_id/Ttimepoint, e.g. embryo_2/T067")
 
+    pr = sub.add_parser("report", help="generate a static HTML report for a run directory")
+    pr.add_argument("run_dir", type=Path, help="e.g. runs/hybrid/claude-opus-4-6/20260520-201511")
+    pr.add_argument("--seed", type=int, default=0, help="which seed's frame-level detail to show")
+    pr.add_argument("--compare", type=Path, default=None, help="another run dir to diff against")
+    pr.add_argument("--gt", type=Path, default=None)
+
     args = p.parse_args(argv)
 
     if args.cmd == "eval":
@@ -82,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
 
         eid, t = args.frame.split("/")
         view_trajectory(args.events, eid, int(t.lstrip("T")))
+        return 0
+
+    if args.cmd == "report":
+        from harness.eval.html_report import generate
+
+        out = generate(args.run_dir, seed=args.seed, compare_dir=args.compare, gt_path=args.gt)
+        print(f"report: file://{out.resolve()}")
         return 0
 
     return 1
