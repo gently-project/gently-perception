@@ -57,7 +57,7 @@ def test_tool_image_externalized(tmp_path):
     with EventWriter(run_dir / "seed0" / "events.jsonl") as w:
         w(Event.run_start({"solver": "x", "model": "m", "seed": 0}))
         w(Event.tool_call("embryo_1", 5, 0, "zoom", {"x": 1}, ImageResult(b64="aGVsbG8=")))
-        w(Event.tool_call("embryo_1", 5, 1, "measure", {"feature": "fill_fraction"}, NumericResult(value=0.7)))
+        w(Event.tool_call("embryo_1", 5, 1, "measure", {"feature": "convexity"}, NumericResult(value=0.7)))
         w(Event.prediction("embryo_1", 5, "comma", "r", False))
     media = run_dir / "seed0" / "media" / "embryo_1_T005_s0_zoom.jpg"
     assert media.exists() and media.read_bytes() == b"hello"

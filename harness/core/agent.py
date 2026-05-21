@@ -98,11 +98,9 @@ def _tool_result_block(tool_use_id: str, result: ToolResult) -> dict[str, Any]:
     raise AssertionError(f"unhandled ToolResult: {result!r}")
 
 
-def _first_tool_use(resp: Any) -> Any | None:
-    for block in getattr(resp, "content", []):
-        if getattr(block, "type", None) == "tool_use":
-            return block
-    return None
+def _tool_uses(resp: Any) -> list[Any]:
+    """All tool_use blocks in a response. The model may emit several in parallel."""
+    return [b for b in getattr(resp, "content", []) if getattr(b, "type", None) == "tool_use"]
 
 
 async def react(frame: FrameInput, solver: Solver, on_event: OnEvent = _noop) -> tuple[Prediction, Trajectory]:
@@ -133,35 +131,42 @@ async def react(frame: FrameInput, solver: Solver, on_event: OnEvent = _noop) ->
         on_event(Event.model_turn(frame.embryo_id, frame.timepoint, step_i, resp.usage))
         traj.steps.append(Step.model(resp))
 
-        tu = _first_tool_use(resp)
-        if tu is None:
+        tool_uses = _tool_uses(resp)
+        if not tool_uses:
             raise ModelOutputError("model returned no tool_use block", resp)
 
-        if tu.name == "classify_stage":
+        # If classify_stage is among the calls (alone or alongside parallel tool
+        # calls), the model has committed to an answer — take it and stop.
+        classify = next((tu for tu in tool_uses if tu.name == "classify_stage"), None)
+        if classify is not None:
             traj.budget_exhausted = force_classify and step_i > 0 and not solver.is_one_shot
             traj.messages.append({"role": "assistant", "content": _content_dicts(resp)})
             return (
                 Prediction(
-                    stage=Stage(tu.input["stage"]),
-                    reasoning=tu.input.get("reasoning", ""),
-                    raw=dict(tu.input),
+                    stage=Stage(classify.input["stage"]),
+                    reasoning=classify.input.get("reasoning", ""),
+                    raw=dict(classify.input),
                 ),
                 traj,
             )
 
-        # Perception tool — dispatch and continue.
+        # Perception tools — dispatch every parallel call; each tool_use id must
+        # get a tool_result in the next message. One round-trip = one step.
         if volume is None and frame.volume_ref.exists():
             volume = load_volume(frame.volume_ref)
-        result = dispatch(tu.name, dict(tu.input), volume=volume, frame=frame)
-        on_event(
-            Event.tool_call(
-                frame.embryo_id, frame.timepoint, step_i, tu.name, dict(tu.input), result
+        result_blocks: list[dict[str, Any]] = []
+        for tu in tool_uses:
+            result = dispatch(tu.name, dict(tu.input), volume=volume, frame=frame)
+            on_event(
+                Event.tool_call(
+                    frame.embryo_id, frame.timepoint, step_i, tu.name, dict(tu.input), result
+                )
             )
-        )
-        traj.steps.append(Step.tool(tu.name, dict(tu.input), result))
+            traj.steps.append(Step.tool(tu.name, dict(tu.input), result))
+            result_blocks.append(_tool_result_block(tu.id, result))
 
         assistant_msg = {"role": "assistant", "content": _content_dicts(resp)}
-        tool_msg = {"role": "user", "content": [_tool_result_block(tu.id, result)]}
+        tool_msg = {"role": "user", "content": result_blocks}
         messages += [assistant_msg, tool_msg]
         traj.messages += [assistant_msg, tool_msg]
 

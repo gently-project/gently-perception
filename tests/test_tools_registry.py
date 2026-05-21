@@ -11,7 +11,7 @@ def test_registry_populated():
 def test_schema_derivation_enum():
     schema = REGISTRY["measure"].schema
     assert schema["input_schema"]["properties"]["feature"]["enum"] == [
-        "fill_fraction",
+        "convexity",
         "n_segments",
         "aspect_ratio",
     ]
@@ -63,6 +63,6 @@ def test_dispatch_success_image():
 
 def test_dispatch_success_numeric():
     vol = make_volume()
-    result = dispatch("measure", {"feature": "fill_fraction"}, volume=vol)
+    result = dispatch("measure", {"feature": "convexity"}, volume=vol)
     assert isinstance(result, NumericResult)
     assert 0.0 <= result.value <= 1.0

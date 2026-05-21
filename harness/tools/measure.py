@@ -26,11 +26,12 @@ def _otsu_mask(proj: np.ndarray) -> np.ndarray:
     return proj > threshold_otsu(proj)
 
 
-def _fill_fraction(volume: np.ndarray) -> tuple[float, str]:
-    """area(full foreground) / area(convex hull ≈ eggshell) on the XY projection.
+def _convexity(volume: np.ndarray) -> tuple[float, str]:
+    """area(foreground) / area(its own convex hull) on the XY projection.
 
-    A concave embryo (folds with gaps) → hull is larger than mask → fraction < 1.
-    A blob filling its hull → fraction ≈ 1.
+    DECREASES with development: an unfolded blob fills its hull (≈0.8); a folded
+    body has gaps between folds so the hull outgrows the mass (pretzel ≈0.57,
+    hatched worm ≈0.32). Empirical per-stage medians are in the tool docstring.
     """
     proj = project_axis(volume, "xy")
     mask = _otsu_mask(proj)
@@ -38,7 +39,7 @@ def _fill_fraction(volume: np.ndarray) -> tuple[float, str]:
         return 0.0, "no signal detected"
     hull = convex_hull_image(mask)
     fill = float(mask.sum()) / max(float(hull.sum()), 1.0)
-    return fill, "foreground_area / convex_hull_area on XY max-projection"
+    return fill, "foreground_area / own_convex_hull_area on XY max-projection (lower = more folded)"
 
 
 def _n_segments(volume: np.ndarray) -> tuple[float, str]:
@@ -70,7 +71,7 @@ def _aspect_ratio(volume: np.ndarray) -> tuple[float, str]:
 
 
 _FEATURES = {
-    "fill_fraction": (_fill_fraction, ""),
+    "convexity": (_convexity, ""),
     "n_segments": (_n_segments, "count"),
     "aspect_ratio": (_aspect_ratio, ""),
 }
@@ -78,14 +79,21 @@ _FEATURES = {
 
 @tool(returns="numeric")
 def measure(
-    volume: np.ndarray, *, feature: Literal["fill_fraction", "n_segments", "aspect_ratio"]
+    volume: np.ndarray, *, feature: Literal["convexity", "n_segments", "aspect_ratio"]
 ) -> NumericResult:
-    """Compute a quantitative morphology feature from the volume.
+    """Compute a quantitative morphology feature from the XY max-projection.
 
-    - fill_fraction: area(embryo mass) / area(eggshell hull) on XY projection.
-      Roughly ~0.5→1.5fold, ~0.7→2fold, ~0.9→pretzel.
-    - n_segments: count of bright bands crossing the minor axis (fold-count proxy).
-    - aspect_ratio: bounding-box width/height of the bright mass.
+    - convexity: foreground area / its own convex-hull area. DECREASES as the
+      body folds (gaps between folds make the hull outgrow the mass).
+      Empirical medians by stage on this dataset: early/bean/comma ≈0.80–0.82,
+      1.5fold ≈0.76, 2fold ≈0.65, pretzel ≈0.57, hatched ≈0.32. The 2fold↔pretzel
+      ranges overlap (2fold 0.61–0.70, pretzel 0.51–0.62) — treat as one signal
+      among several, not a decision rule.
+    - n_segments: count of separated bright components. early≈1, bean/comma≈2,
+      1.5fold≈3, 2fold and pretzel both ≈5 (does NOT separate those two),
+      hatched≈10.
+    - aspect_ratio: bounding-box width/height. Not discriminative on this data
+      (≈2.0 at every stage) — rarely worth a call.
     """
     fn, unit = _FEATURES[feature]
     value, note = fn(volume)

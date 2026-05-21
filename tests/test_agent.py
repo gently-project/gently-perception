@@ -18,7 +18,7 @@ def test_one_shot_forces_classify(tiny_frame, stub_generate):
 
 def test_agentic_dispatch_then_classify(tiny_frame, stub_generate):
     s = Solver(name="t", system="sys", tools=("measure",), max_steps=3)
-    stub_generate.queue.append(fake_response([tool_block("measure", feature="fill_fraction")]))
+    stub_generate.queue.append(fake_response([tool_block("measure", feature="convexity")]))
     stub_generate.queue.append(fake_response([classify_block("2fold")]))
     pred, traj = arun(react(tiny_frame, s))
     assert pred.stage == Stage.TWO_FOLD
@@ -31,7 +31,7 @@ def test_agentic_dispatch_then_classify(tiny_frame, stub_generate):
 def test_budget_exhaustion_forces_classify(tiny_frame, stub_generate):
     s = Solver(name="t", system="sys", tools=("measure",), max_steps=2)
     stub_generate.queue.append(fake_response([tool_block("measure", feature="aspect_ratio")]))
-    stub_generate.queue.append(fake_response([tool_block("measure", feature="fill_fraction")]))
+    stub_generate.queue.append(fake_response([tool_block("measure", feature="convexity")]))
     stub_generate.queue.append(fake_response([classify_block("pretzel")]))
     pred, traj = arun(react(tiny_frame, s))
     assert pred.stage == Stage.PRETZEL
@@ -44,6 +44,41 @@ def test_no_tool_use_raises(tiny_frame, stub_generate):
     stub_generate.queue.append(fake_response([{"type": "text", "text": "I think it's comma"}]))
     with pytest.raises(ModelOutputError):
         arun(react(tiny_frame, s))
+
+
+def test_parallel_tool_calls_all_get_results(tiny_frame, stub_generate):
+    """Multiple tool_use blocks in one response → every id gets a tool_result."""
+    s = Solver(name="t", system="sys", tools=("measure",), max_steps=3)
+    resp = fake_response(
+        [
+            {"type": "tool_use", "id": "tu_a", "name": "measure", "input": {"feature": "convexity"}},
+            {"type": "tool_use", "id": "tu_b", "name": "measure", "input": {"feature": "n_segments"}},
+        ]
+    )
+    stub_generate.queue.append(resp)
+    stub_generate.queue.append(fake_response([classify_block("2fold")]))
+    pred, traj = arun(react(tiny_frame, s))
+    assert pred.stage == Stage.TWO_FOLD
+    assert traj.n_tool_calls == 2  # both dispatched
+    # The next request's tool_result message must answer both ids.
+    results = stub_generate.calls[1]["messages"][-1]["content"]
+    assert {r["tool_use_id"] for r in results} == {"tu_a", "tu_b"}
+
+
+def test_classify_among_parallel_calls_wins(tiny_frame, stub_generate):
+    """If classify_stage arrives alongside other tool calls, take the answer and stop."""
+    s = Solver(name="t", system="sys", tools=("measure",), max_steps=3)
+    stub_generate.queue.append(
+        fake_response(
+            [
+                {"type": "tool_use", "id": "tu_a", "name": "measure", "input": {"feature": "convexity"}},
+                classify_block("pretzel"),
+            ]
+        )
+    )
+    pred, traj = arun(react(tiny_frame, s))
+    assert pred.stage == Stage.PRETZEL
+    assert len(stub_generate.calls) == 1  # no second round trip
 
 
 def test_tool_error_fed_back(tiny_frame, stub_generate):
