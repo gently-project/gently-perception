@@ -56,10 +56,14 @@ async def run(
     volumes_dir: Path | None = None,
     gt_path: Path | None = None,
     concurrency: int = 4,
+    embryos: set[str] | None = None,
 ) -> dict:
     solver, _solver_mod = _load_solver(solver_name)
     gt = GroundTruth.from_json(gt_path or (DATA_DIR / "ground_truth" / "59799c78.json"))
-    source = OfflineSource(volumes_dir or (DATA_DIR / "volumes"))
+    source: list[tuple[str, int, Path]] = list(OfflineSource(volumes_dir or (DATA_DIR / "volumes")))
+    if embryos:
+        source = [item for item in source if item[0] in embryos]
+        assert source, f"no volumes found for embryos {sorted(embryos)}"
     refs = _load_refs()
     verifier = verify.VERIFIERS[verifier_name]
 

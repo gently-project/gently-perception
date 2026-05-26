@@ -1,0 +1,42 @@
+{
+  "session_id": "2cfd8f4e",
+  "annotator": "Kesavan",
+  "notes": "Rolling-release embryos 5-8 (May 2026). Single-annotator transitions through pretzel; no hatching/hatched annotations \u2014 frames after an unannotated hatch would be labeled pretzel.",
+  "transitions": {
+    "embryo_5": {
+      "early": 0,
+      "bean": 10,
+      "comma": 17,
+      "1.5fold": 21,
+      "2fold": 29,
+      "pretzel": 73
+    },
+    "embryo_6": {
+      "early": 0,
+      "bean": 10,
+      "comma": 16,
+      "1.5fold": 21,
+      "2fold": 28,
+      "pretzel": 41,
+      "hatched": 98
+    },
+    "embryo_7": {
+      "early": 0,
+      "bean": 22,
+      "comma": 35,
+      "1.5fold": 40,
+      "2fold": 50,
+      "pretzel": 60,
+      "hatched": 119
+    },
+    "embryo_8": {
+      "early": 0,
+      "bean": 16,
+      "comma": 24,
+      "1.5fold": 30,
+      "2fold": 40,
+      "pretzel": 53,
+      "hatched": 110
+    }
+  }
+}

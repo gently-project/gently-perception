@@ -28,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--accept-drift", action="store_true")
     pe.add_argument("--update-baseline", action="store_true")
     pe.add_argument("--concurrency", type=int, default=4, help="parallel embryo sessions")
+    pe.add_argument("--embryos", nargs="*", default=None, help="restrict to these embryo ids")
+    pe.add_argument("--volumes", type=Path, default=None, help="volumes directory override")
+    pe.add_argument("--gt", type=Path, default=None, help="ground truth JSON override")
 
     ps = sub.add_parser("score", help="score an existing events.jsonl")
     ps.add_argument("events", type=Path)
@@ -61,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
                 accept_drift=args.accept_drift,
                 update_baseline=args.update_baseline,
                 concurrency=args.concurrency,
+                embryos=set(args.embryos) if args.embryos else None,
+                volumes_dir=args.volumes,
+                gt_path=args.gt,
             )
         )
         return 0
