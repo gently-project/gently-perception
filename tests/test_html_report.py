@@ -38,6 +38,31 @@ def test_report_generates(tmp_path):
     assert errs[0]["reasoning"] == "reasoning for T4"
 
 
+def test_report_failure_clusters(tmp_path):
+    """late_arrival / window_missed / ahead assignment, window stats, and example selection."""
+    preds = [
+        (0, "early"), (1, "early"), (2, "bean"),                  # t2 ahead of gt
+        (3, "early"), (4, "early"), (5, "early"),                  # bean window (3-5) never entered
+        (6, "bean"), (7, "bean"), (8, "comma"), (9, "comma"),      # comma window (6-9) entered late
+    ]
+    run = _make_run(tmp_path, "runC", preds)
+    out = generate(run, gt_path=_gt(tmp_path), volumes_dir=tmp_path / "novolumes")
+    html = out.read_text()
+    assert "clustersSec" in html
+    data = json.loads(html.split('type="application/json">')[1].split("</script>")[0])
+    c = data["clusters"]
+    assert c["n_pred"] == 10 and c["n_fail"] == 6
+    assert c["behind"] == 5 and c["ahead"] == 1
+    assert c["windows_missed"] == 1 and c["windows_total"] == 3
+    assert c["lag_median"] == 2 and c["lag_max"] == 2
+    by_key = {cl["key"]: cl for cl in c["clusters"]}
+    assert by_key["window_missed"]["count"] == 3
+    assert by_key["late_arrival"]["count"] == 2
+    assert by_key["ahead"]["count"] == 1
+    assert by_key["ahead"]["examples"] == [{"e": "embryo_1", "t": 2}]
+    assert by_key["late_arrival"]["pairs"][0] == ["comma→bean", 2]
+
+
 def test_report_compare(tmp_path):
     gt = _gt(tmp_path)
     a = _make_run(tmp_path, "runA", [(0, "early"), (3, "bean"), (4, "comma")])  # t4 wrong

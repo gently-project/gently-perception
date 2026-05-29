@@ -153,6 +153,111 @@ def _compare(frames: list[dict[str, Any]], other_events: Path) -> dict[str, Any]
     return {"wins": wins, "regressions": regressions, "changed": changed, "n_joined": len(theirs)}
 
 
+def _failure_clusters(run_dir: Path, gt: GroundTruth, *, detail_seed: int) -> dict[str, Any] | None:
+    """Group wrong predictions from all seeds into three behavioural clusters.
+
+    late_arrival  — the model predicts the GT stage somewhere inside its window, just late
+    window_missed — the GT stage's window passes without the model ever predicting it
+    ahead         — the model predicts a stage later than the annotation
+
+    Examples are taken from the detail seed so the report can link them to frame cards.
+    """
+    keys = ("late_arrival", "window_missed", "ahead")
+    counts = dict.fromkeys(keys, 0)
+    embryos: dict[str, dict[str, int]] = {k: {} for k in keys}
+    pairs: dict[str, dict[str, int]] = {k: {} for k in keys}
+    examples: dict[str, list[dict[str, Any]]] = {k: [] for k in keys}
+    lags: list[int] = []
+    windows_missed = windows_total = n_pred = n_fail = 0
+
+    for events_path in sorted(run_dir.glob("seed*/events.jsonl")):
+        preds: dict[tuple[str, int], Stage] = {}
+        for ev in read_events(events_path):
+            if ev.kind == "prediction" and ev.embryo_id is not None and ev.timepoint is not None:
+                preds[(ev.embryo_id, ev.timepoint)] = Stage(ev.payload["stage"])
+        if not preds:
+            continue
+        is_detail = events_path == run_dir / f"seed{detail_seed}" / "events.jsonl"
+
+        # Which GT windows does this seed ever enter, and how late?
+        reached: dict[tuple[str, Stage], bool] = {}
+        for embryo, stage_map in gt.transitions.items():
+            ts = sorted(t for (e, t) in preds if e == embryo)
+            if not ts:
+                continue
+            ordered = sorted(stage_map.items(), key=lambda kv: kv[1])
+            for i, (stage, start) in enumerate(ordered):
+                end = ordered[i + 1][1] - 1 if i + 1 < len(ordered) else ts[-1]
+                in_window = [t for t in ts if start <= t <= end]
+                if not in_window:
+                    continue
+                windows_total += 1
+                first_hit = next((t for t in in_window if preds[(embryo, t)] == stage), None)
+                reached[(embryo, stage)] = first_hit is not None
+                if first_hit is None:
+                    windows_missed += 1
+                elif first_hit > start:
+                    lags.append(first_hit - start)
+
+        for (embryo, t), pred in preds.items():
+            true = gt.get_stage_at(embryo, t)
+            if true is None:
+                continue
+            n_pred += 1
+            if pred == true:
+                continue
+            n_fail += 1
+            if pred.ordinal > true.ordinal:
+                key = "ahead"
+            elif reached.get((embryo, true)):
+                key = "late_arrival"
+            else:
+                key = "window_missed"
+            counts[key] += 1
+            embryos[key][embryo] = embryos[key].get(embryo, 0) + 1
+            pair = f"{true.value}→{pred.value}"
+            pairs[key][pair] = pairs[key].get(pair, 0) + 1
+            if is_detail:
+                examples[key].append({"e": embryo, "t": t})
+
+    if n_fail == 0:
+        return None
+
+    def spread(rows: list[dict[str, Any]], k: int = 3) -> list[dict[str, Any]]:
+        """Up to k examples, cycling embryos so one embryo doesn't take every slot."""
+        by_embryo: dict[str, list[dict[str, Any]]] = {}
+        for r in sorted(rows, key=lambda r: (r["e"], r["t"])):
+            by_embryo.setdefault(r["e"], []).append(r)
+        picked: list[dict[str, Any]] = []
+        while len(picked) < k and any(by_embryo.values()):
+            for e in sorted(by_embryo):
+                if by_embryo[e] and len(picked) < k:
+                    picked.append(by_embryo[e].pop(0))
+        return picked
+
+    lags.sort()
+    return {
+        "n_pred": n_pred,
+        "n_fail": n_fail,
+        "behind": counts["late_arrival"] + counts["window_missed"],
+        "ahead": counts["ahead"],
+        "windows_missed": windows_missed,
+        "windows_total": windows_total,
+        "lag_median": lags[len(lags) // 2] if lags else 0,
+        "lag_max": lags[-1] if lags else 0,
+        "clusters": [
+            {
+                "key": k,
+                "count": counts[k],
+                "embryos": embryos[k],
+                "pairs": sorted(pairs[k].items(), key=lambda kv: -kv[1]),
+                "examples": spread(examples[k]),
+            }
+            for k in keys
+        ],
+    }
+
+
 def generate(
     run_dir: Path,
     *,
@@ -174,6 +279,7 @@ def generate(
         "run_dir": str(run_dir),
         "seed": seed,
         "summary": _summary(run_dir, gt),
+        "clusters": _failure_clusters(run_dir, gt, detail_seed=seed),
         "frames": frames,
         "transitions": {e: {s.value: t for s, t in m.items()} for e, m in gt.transitions.items()},
         "stages": [s.value for s in STAGE_ORDER],
@@ -254,6 +360,23 @@ table.cm td.zero{color:#3a3f4a}
 .tag.gt{color:var(--ok);border-color:#3a5a40}
 .tag.win{color:var(--ok);border-color:#3a5a40}
 .card .why{font:12px/1.5 var(--sans);color:var(--dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.clNote{font:12px var(--mono);color:var(--dim);margin:2px 0 14px}
+.clGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.clCard{border:1px solid var(--line);border-radius:7px;background:var(--panel2);padding:14px 16px;display:flex;flex-direction:column;gap:9px}
+.clHead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.clHead h3{margin:0;font:600 13px var(--sans);color:var(--bright)}
+.clCount{font:600 12px var(--mono);color:var(--accent);white-space:nowrap}
+.clCount b{font-size:15px}
+.clChips{display:flex;flex-wrap:wrap;gap:6px}
+.clChip{font:11px var(--mono);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:1px 8px}
+.clPairs{font:11px var(--mono);color:var(--dim)}
+.clPairs b{color:var(--txt)}
+.clDef{font:12.5px/1.55 var(--sans);color:var(--txt);margin:0}
+.clThumbs{display:flex;gap:10px;margin-top:auto}
+.clThumb{margin:0;cursor:pointer;flex:1;min-width:0}
+.clThumb img{width:100%;border-radius:4px;display:block;border:1px solid var(--line);background:#000}
+.clThumb:hover img{border-color:var(--accent)}
+.clThumb figcaption{font:10.5px var(--mono);color:var(--dim);margin-top:4px;text-align:center}
 .modal{display:none;position:fixed;inset:0;background:rgba(10,11,14,.92);z-index:50;overflow-y:auto;padding:36px 5vw}
 .modal.on{display:block}
 .modal .box{max-width:880px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:24px 28px}
@@ -280,6 +403,11 @@ table.cm td.zero{color:#3a3f4a}
 <section><h2>Summary</h2><div class="kpis" id="kpis"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap"><div style="flex:1;min-width:300px"><div class="bars" id="bars"></div></div>
   <div><div style="font:11px var(--mono);color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Confusion (true ↓ / predicted →)</div><div id="cm"></div></div></div>
+</section>
+<section id="clustersSec" style="display:none"><h2>Failure clusters</h2>
+  <div class="kpis" id="clKpis"></div>
+  <div class="clNote" id="clNote"></div>
+  <div class="clGrid" id="clGrid"></div>
 </section>
 <section><h2>Filmstrip</h2><div id="strips"></div>
   <div class="legend"><span><i style="background:#2a4030"></i>correct</span><span><i style="background:#4a3d24"></i>adjacent</span><span><i style="background:#4d2b2b"></i>wrong</span><span><i style="background:#23262d"></i>unscored</span><span>│ GT transition</span></div>
@@ -331,6 +459,30 @@ let h='<table class="cm"><tr><th></th>'+st.map(s=>'<th>'+s.slice(0,7)+'</th>').j
 st.forEach(a=>{h+='<tr><th>'+a+'</th>'+st.map(b=>{const n=S.confusion[a+'|'+b]||0;
 return '<td class="'+(n===0?'zero':a===b?'diag':'off')+'">'+(n||'·')+'</td>'}).join('')+'</tr>'});
 document.getElementById('cm').innerHTML=h+'</table>'})();
+
+// failure clusters
+(()=>{const C=D.clusters;if(!C||!C.n_fail)return;
+document.getElementById('clustersSec').style.display='';
+document.getElementById('clKpis').innerHTML=
+  kpi(C.n_fail+' / '+C.n_pred,'wrong predictions · all seeds')+
+  kpi(C.behind+' · '+Math.round(100*C.behind/C.n_fail)+'%','earlier than gt')+
+  kpi(C.ahead+' · '+Math.round(100*C.ahead/C.n_fail)+'%','later than gt')+
+  kpi(C.windows_missed+' / '+C.windows_total,'gt windows never entered');
+document.getElementById('clNote').textContent='grouped by behaviour across all seeds · examples from seed'+D.seed+' · click an example to open its trajectory';
+const labels={late_arrival:'Reaches the stage late',window_missed:'Stage window missed outright',ahead:'Ahead of the annotation'};
+const defs={late_arrival:'The model does predict the gt stage inside its window, just late — median lag '+C.lag_median+' frames (max '+C.lag_max+') after the gt boundary.',
+  window_missed:'The gt stage window passes without the model ever predicting that stage.',
+  ahead:'The model predicts a stage later than the annotation.'};
+document.getElementById('clGrid').innerHTML=C.clusters.filter(c=>c.count).map(c=>{
+  const chips=Object.entries(c.embryos).sort((a,b)=>b[1]-a[1]).map(([e,n])=>'<span class="clChip">'+esc(e.replace('embryo_','e'))+' · '+n+'</span>').join('');
+  const pr=c.pairs.slice(0,3).map(p=>esc(p[0])+' <b>'+p[1]+'</b>').join(' &nbsp;·&nbsp; ');
+  const th=(c.examples||[]).map(x=>{const i=byKey[x.e+'|'+x.t];if(i==null)return '';const f=F[i];
+    return '<figure class="clThumb" data-k="'+f.e+'|'+f.t+'">'+(f.thumb?'<img loading="lazy" src="'+f.thumb+'">':'')+
+      '<figcaption>'+esc(f.e.replace('embryo_','e'))+' T'+f.t+' · gt '+esc(f.gt)+' · pred '+esc(f.pred)+'</figcaption></figure>';}).join('');
+  return '<div class="clCard"><div class="clHead"><h3>'+labels[c.key]+'</h3><span class="clCount"><b>'+c.count+'</b> · '+Math.round(100*c.count/C.n_fail)+'%</span></div>'+
+    '<div class="clChips">'+chips+'</div><div class="clPairs">'+pr+'</div><p class="clDef">'+defs[c.key]+'</p>'+
+    (th?'<div class="clThumbs">'+th+'</div>':'')+'</div>';
+}).join('')})();
 
 // filmstrip
 (()=>{const emb={};F.forEach(f=>{(emb[f.e]=emb[f.e]||[]).push(f)});
