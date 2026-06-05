@@ -11,6 +11,7 @@ never mutates events.
 from __future__ import annotations
 
 import base64
+import importlib
 import io
 import json
 import os
@@ -259,6 +260,35 @@ def _failure_clusters(run_dir: Path, gt: GroundTruth, *, detail_seed: int) -> di
     }
 
 
+def _embryo_span(ids: list[str]) -> str:
+    """['embryo_5', ..., 'embryo_8'] → 'e5–8'; non-contiguous ids are listed."""
+    nums = sorted(int(i.rsplit("_", 1)[-1]) for i in ids if i.rsplit("_", 1)[-1].isdigit())
+    if not nums:
+        return ""
+    if nums == list(range(nums[0], nums[-1] + 1)) and len(nums) > 1:
+        return f"e{nums[0]}–{nums[-1]}"
+    return "e" + ",".join(str(n) for n in nums)
+
+
+def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
+    """Human-readable dropdown label: what the solver change was, dataset, date."""
+    solver, _model, ts = d.parts[-3:]
+    desc = solver
+    try:
+        mod = importlib.import_module(f"harness.solvers.{solver}")
+        desc = (mod.__doc__ or solver).strip().splitlines()[0].rstrip(".")
+    except Exception:
+        pass  # deleted/renamed solver — fall back to its directory name
+    span = ""
+    try:
+        start = json.loads((d / "seed0" / "events.jsonl").open().readline())
+        span = gt_embryos.get(start["payload"]["gt_sha"], "")
+    except Exception:
+        pass
+    date = f"{ts[4:6]}/{ts[6:8]}" if len(ts) >= 8 else ts
+    return " · ".join(x for x in (desc, span, date) if x)
+
+
 def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
     """Every run dir under runs/ with a report.html, for the run-switcher dropdown.
 
@@ -268,12 +298,17 @@ def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
     """
     run_dir = run_dir.resolve()
     runs_root = _REPO_ROOT / "runs"
+    gt_embryos = {
+        GroundTruth.from_json(p).sha(): _embryo_span(sorted(json.load(p.open())["transitions"]))
+        for p in (_REPO_ROOT / "data" / "ground_truth").glob("*.json")
+    }
     dirs = {p.parent for p in runs_root.glob("*/*/*/report.html")} | {run_dir}
     out: list[dict[str, Any]] = []
     for d in sorted(dirs, key=lambda p: (p.parts[-3], p.parts[-1]), reverse=True):
         out.append(
             {
-                "label": "/".join(d.relative_to(runs_root).parts),
+                "label": _run_label(d, gt_embryos),
+                "path": "/".join(d.relative_to(runs_root).parts),
                 "href": os.path.relpath(d / "report.html", run_dir),
                 "current": d == run_dir,
             }
@@ -467,7 +502,7 @@ document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' 
 
 // run switcher
 const runSel=document.getElementById('runSel');
-(D.runs||[]).forEach(r=>{const o=document.createElement('option');o.value=r.href;o.textContent=r.label;o.selected=!!r.current;runSel.appendChild(o)});
+(D.runs||[]).forEach(r=>{const o=document.createElement('option');o.value=r.href;o.textContent=r.label;o.title=r.path||'';o.selected=!!r.current;runSel.appendChild(o)});
 if((D.runs||[]).length<2)document.getElementById('runSelWrap').style.display='none';
 runSel.addEventListener('change',()=>{location.href=runSel.value});
 
