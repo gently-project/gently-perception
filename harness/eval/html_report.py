@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,28 @@ def _failure_clusters(run_dir: Path, gt: GroundTruth, *, detail_seed: int) -> di
     }
 
 
+def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
+    """Every run dir under runs/ with a report.html, for the run-switcher dropdown.
+
+    Hrefs are relative to `run_dir` so the links work from file:// and any
+    static server rooted at runs/. The current run is always included even
+    though its report is still being written.
+    """
+    run_dir = run_dir.resolve()
+    runs_root = _REPO_ROOT / "runs"
+    dirs = {p.parent for p in runs_root.glob("*/*/*/report.html")} | {run_dir}
+    out: list[dict[str, Any]] = []
+    for d in sorted(dirs, key=lambda p: (p.parts[-3], p.parts[-1]), reverse=True):
+        out.append(
+            {
+                "label": "/".join(d.relative_to(runs_root).parts),
+                "href": os.path.relpath(d / "report.html", run_dir),
+                "current": d == run_dir,
+            }
+        )
+    return out
+
+
 def generate(
     run_dir: Path,
     *,
@@ -277,6 +300,7 @@ def generate(
     data: dict[str, Any] = {
         "config": _run_config(events_path),
         "run_dir": str(run_dir),
+        "runs": _sibling_runs(run_dir),
         "seed": seed,
         "summary": _summary(run_dir, gt),
         "clusters": _failure_clusters(run_dir, gt, detail_seed=seed),
@@ -395,11 +419,17 @@ table.cm td.zero{color:#3a3f4a}
 .cmp h3.w{color:var(--ok)}.cmp h3.r{color:var(--bad)}.cmp h3.c{color:var(--adj)}
 .close{position:fixed;top:18px;right:26px;font:300 30px var(--sans);color:var(--dim);cursor:pointer;z-index:51}
 .close:hover{color:var(--bright)}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+.runSel{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+.runSel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:12px var(--mono);max-width:380px;cursor:pointer}
+.runSel select:hover{border-color:var(--accent)}
 </style>
 </head>
 <body>
-<h1 id="title"></h1>
-<div class="sub" id="subtitle"></div>
+<div class="hdr">
+  <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
+  <label class="runSel" id="runSelWrap">run <select id="runSel"></select></label>
+</div>
 <section><h2>Summary</h2><div class="kpis" id="kpis"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap"><div style="flex:1;min-width:300px"><div class="bars" id="bars"></div></div>
   <div><div style="font:11px var(--mono);color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Confusion (true ↓ / predicted →)</div><div id="cm"></div></div></div>
@@ -434,6 +464,12 @@ const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 // header
 document.getElementById('title').textContent=(D.config.solver||'run')+' · '+(D.config.model||'');
 document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' detail  ·  '+D.summary.n_seeds+' seed(s) aggregated';
+
+// run switcher
+const runSel=document.getElementById('runSel');
+(D.runs||[]).forEach(r=>{const o=document.createElement('option');o.value=r.href;o.textContent=r.label;o.selected=!!r.current;runSel.appendChild(o)});
+if((D.runs||[]).length<2)document.getElementById('runSelWrap').style.display='none';
+runSel.addEventListener('change',()=>{location.href=runSel.value});
 
 // KPIs
 const S=D.summary, H=S.hard||{};
