@@ -111,6 +111,41 @@ def _thumbnails(frames: list[dict[str, Any]], assets_dir: Path, volumes_dir: Pat
         full.save(thumb, format="JPEG", quality=80)
 
 
+def _rotated_thumbnails(
+    frames: list[dict[str, Any]], assets_dir: Path, volumes_dir: Path, solver_name: str
+) -> None:
+    """For solvers that fed rotated views to the model (an ANGLES attribute on
+    the solver module), write those views for every FAILED frame so the report
+    shows exactly what the model was looking at when it got it wrong."""
+    try:
+        angles = importlib.import_module(f"harness.solvers.{solver_name}").ANGLES
+    except (ImportError, AttributeError):
+        return
+    if not volumes_dir.exists():
+        return
+    from harness.tools.rotate import rotated_mip_b64  # heavy scipy import, only needed here
+
+    paths = {(e, t): p for e, t, p in OfflineSource(volumes_dir)}
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for r in frames:
+        key = (r["e"], r["t"])
+        if r.get("ok") is not False or key not in paths:  # only true failures
+            continue
+        rot: list[dict[str, Any]] = []
+        for angle in angles:
+            name = f"{r['e']}_T{r['t']:03d}_rot{int(angle)}.jpg"
+            out = assets_dir / name
+            rot.append({"a": int(angle), "src": f"report_assets/{name}"})
+            if out.exists():
+                continue
+            img = Image.open(io.BytesIO(base64.b64decode(rotated_mip_b64(paths[key], angle))))
+            scale = THUMB_LONG_EDGE / max(img.size)
+            if scale < 1.0:
+                img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
+            img.save(out, format="JPEG", quality=80)
+        r["rot"] = rot
+
+
 def _summary(run_dir: Path, gt: GroundTruth) -> dict[str, Any]:
     seed_files = sorted(run_dir.glob("seed*/events.jsonl"))
     scores = [score_run(p, gt) for p in seed_files]
@@ -330,10 +365,13 @@ def generate(
     events_path = run_dir / f"seed{seed}" / "events.jsonl"
 
     frames = _frames_from_events(events_path, gt, seed_rel=f"seed{seed}")
-    _thumbnails(frames, run_dir / "report_assets", volumes_dir or (_REPO_ROOT / "data" / "volumes"))
+    config = _run_config(events_path)
+    vols = volumes_dir or (_REPO_ROOT / "data" / "volumes")
+    _thumbnails(frames, run_dir / "report_assets", vols)
+    _rotated_thumbnails(frames, run_dir / "report_assets", vols, str(config.get("solver", "")))
 
     data: dict[str, Any] = {
-        "config": _run_config(events_path),
+        "config": config,
         "run_dir": str(run_dir),
         "runs": _sibling_runs(run_dir),
         "seed": seed,
@@ -443,6 +481,10 @@ table.cm td.zero{color:#3a3f4a}
 .modal .head .id{font:600 14px var(--mono);color:var(--bright)}
 .modal .head .nav{font:12px var(--mono);color:var(--dim)}
 .modal img.main{max-width:100%;border-radius:5px;background:#000;display:block;margin:0 auto 16px}
+.rotRow{display:flex;gap:10px;margin:0 0 16px}
+.rotRow figure{flex:1;margin:0}
+.rotRow img{width:100%;border-radius:5px;background:#000;display:block}
+.rotRow figcaption{font:10px var(--mono);color:var(--dim);letter-spacing:.08em;text-align:center;margin-top:5px;text-transform:uppercase}
 .step{border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:11px 14px;margin-bottom:10px;font:12px var(--mono)}
 .step .sn{color:var(--accent);margin-right:8px}
 .step img{max-width:340px;display:block;margin-top:9px;border-radius:4px;background:#000}
@@ -600,6 +642,7 @@ let cur=-1;
 function open(i){cur=i;const f=F[i];
 let h='<div class="head"><span class="id">'+f.e+' · T'+f.t+'</span><span class="nav">'+(i+1)+' / '+F.length+' · ←→ navigate · esc close</span></div>';
 if(f.thumb)h+='<img class="main" src="'+f.thumb+'">';
+if(f.rot&&f.rot.length)h+='<div class="rotRow">'+f.rot.map(r=>'<figure><img loading="lazy" src="'+r.src+'"><figcaption>rotated '+r.a+'°</figcaption></figure>').join('')+'</div>';
 h+='<div class="vs" style="justify-content:flex-end;margin-bottom:14px"><span class="tag '+(f.ok?'gt':'pred')+'">pred '+f.pred+'</span><span class="tag gt">gt '+f.gt+'</span><span class="tag">'+(f.tokens||0)+' tok</span></div>';
 (f.steps||[]).forEach((s,j)=>{h+='<div class="step"><span class="sn">'+(j+1)+'</span>'+s.name+'('+esc(JSON.stringify(s.params))+')'+
   (s.error?' → <span class="err">'+esc(s.error)+'</span>':'')+
