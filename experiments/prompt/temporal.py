@@ -70,6 +70,7 @@ async def perceive_temporal(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Reference-focused classification with strong temporal anchoring."""
     content = build_reference_content(references)

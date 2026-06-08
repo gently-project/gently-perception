@@ -81,6 +81,7 @@ async def perceive_contrastive(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Single API call with contrastive stage descriptions."""
     content = build_reference_content(references)

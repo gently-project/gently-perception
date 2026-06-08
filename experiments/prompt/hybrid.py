@@ -150,6 +150,7 @@ async def perceive_hybrid(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Stage-adaptive classification using best prompt per expected stage."""
     # Determine expected stage from history

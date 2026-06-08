@@ -82,6 +82,7 @@ async def perceive_unified(
     references: dict[str, list[str]],
     history: list[dict],
     timepoint: int,
+    **kw,
 ) -> PerceptionOutput:
     """Unified classification combining temporal anchoring + scientific criteria."""
     content = build_reference_content(references)
