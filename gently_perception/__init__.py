@@ -23,7 +23,7 @@ Usage in benchmarks::
 """
 
 from .perceiver import Perceiver, Session, Observation
-from .types import PerceptionOutput
+from .types import PerceptionOutput, CameraParams
 from .temporal import TemporalContext, analyze_temporal
 from .examples import load_examples
 from .organism import OrganismConfig, CELEGANS
@@ -33,6 +33,7 @@ __all__ = [
     "Session",
     "Observation",
     "PerceptionOutput",
+    "CameraParams",
     "TemporalContext",
     "analyze_temporal",
     "load_examples",
