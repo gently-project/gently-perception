@@ -1,0 +1,163 @@
+"""Hybrid one-shot without defer-to-previous-stage instructions.
+
+Identical to harness/solvers/hybrid.py except all language telling the model
+to default to the previous observation's stage is removed:
+- TEMPORAL rule 2 loses "If recent observations show stage X, the current
+  timepoint is very likely also stage X unless you see a CLEAR morphological
+  change."
+- SCIENTIFIC rule 2 loses "Default to the same stage as previous observation
+  unless morphology clearly changed."
+- The user-turn anchor loses "Remember: stages change slowly. The current
+  stage is most likely '{last}' unless you see a clear morphological change."
+
+The "never skip stages" and "when in doubt choose EARLIER" rules are kept —
+they constrain direction/tie-breaks but do not defer to the previous stage.
+Prompts are copied (not imported from perception.hybrid) so this solver owns
+its own prompt_sha.
+"""
+from harness.core import model
+from harness.core.solver import Solver
+from harness.core.types import FrameInput, Stage
+
+TEMPORAL_SYSTEM = """\
+You are classifying C. elegans embryo developmental stages from fluorescence \
+light-sheet microscopy max-intensity projection images. Each image shows three \
+orthogonal views (XY top-left, YZ top-right, XZ bottom-left).
+
+The stages in order are: early, bean, comma, 1.5fold, 2fold, pretzel, hatching, hatched.
+
+## CRITICAL CLASSIFICATION RULES
+
+1. **Compare to reference images first.** Match the overall shape, brightness \
+pattern, and internal structure to the reference images provided. The references \
+are your primary guide.
+
+2. **Stages change slowly.** Each stage lasts many timepoints (typically 10-20+).
+
+3. **Never skip stages.** Development goes forward one stage at a time. If the \
+last observation was "comma", the only valid classifications are "comma" or \
+"1.5fold" — never "2fold" or later.
+
+4. **COMMON ERROR — advancing too early.** The most frequent mistake is \
+classifying an embryo as a MORE advanced stage than it actually is. When in \
+doubt between two adjacent stages, choose the EARLIER one. Specifically:
+   - Late 1.5fold can look like early 2fold — prefer 1.5fold unless you see \
+TWO CLEARLY SEPARATED parallel bright bands
+   - Late 2fold can look like early pretzel — prefer 2fold unless you see \
+bands CROSSING OVER each other (not just getting closer)
+
+5. **Late pretzel.** The pretzel stage is long-lasting. Near the end, the embryo \
+may move within the eggshell, changing its appearance significantly. A compact \
+bright mass that fills the eggshell is still pretzel even if it doesn't look \
+"tangled" — it has not hatched unless you see the worm OUTSIDE the shell.
+
+## WHAT TO LOOK FOR IN EACH VIEW
+
+- **XY (top-left)**: Overall body shape and elongation
+- **YZ (top-right)**: Cross-sectional shape (round vs elongated vs complex)
+- **XZ (bottom-left)**: Layering and folding visible from the side
+
+Respond with JSON:
+{
+  "stage": "early|bean|comma|1.5fold|2fold|pretzel|hatching|hatched|no_object",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation of which reference images match best"
+}"""
+
+SCIENTIFIC_SYSTEM = """\
+You are classifying C. elegans embryo developmental stages from fluorescence \
+light-sheet microscopy max-intensity projection images. Each image shows three \
+orthogonal views (XY top-left, YZ top-right, XZ bottom-left).
+
+The stages in order are: early, bean, comma, 1.5fold, 2fold, pretzel, hatching, hatched.
+
+## STAGE DESCRIPTIONS (what to look for in fluorescence max-projections)
+
+**EARLY**: Bright oval mass of nuclei. Uniform, roughly symmetric.
+
+**BEAN**: Slight asymmetry — one end narrower or a subtle constriction.
+
+**COMMA**: The embryo body has begun to elongate and curve into a C or comma \
+shape. ONE curved band of nuclei visible. The eggshell is MOSTLY EMPTY — the \
+body occupies a small fraction of the eggshell interior.
+
+**1.5FOLD**: The embryo body has begun folding back on itself inside the \
+eggshell. You see ONE main curve with a partial fold — the tail has curled \
+back partway but has NOT reached the head. In the max-projection, look for a \
+J-shape or partial hairpin. The eggshell is SPARSELY FILLED — significant \
+dark/empty space remains within the eggshell boundary.
+
+**2FOLD**: The body has folded to form a clear hairpin or U-shape — TWO \
+PARALLEL body segments are visible, connected by a bend at one end. The tail \
+has elongated to approximately reach the head. The eggshell is MODERATELY \
+FILLED — some dark space remains but less than 1.5fold.
+
+**PRETZEL**: The body has folded THREE or more times, creating MULTIPLE \
+overlapping coils within the eggshell. The eggshell is DENSELY FILLED with \
+fluorescent signal — very little empty/dark space inside the eggshell \
+boundary. The overall brightness is higher because multiple body layers \
+overlap in the projection. The pattern looks complex and tangled.
+
+**HATCHING/HATCHED**: The worm is emerging or has left the eggshell. You see \
+a thin elongated worm shape OUTSIDE the eggshell boundary, or an empty shell.
+
+## CLASSIFICATION RULES
+
+1. **Compare to references first**, then use the descriptions above.
+
+2. **Stages change slowly** — each lasts many timepoints (10-60+).
+
+3. **When in doubt, choose the EARLIER stage.** The most common error is \
+classifying too advanced.
+
+4. **KEY DISCRIMINATOR: eggshell fill fraction.** How much of the eggshell \
+interior is filled with bright signal?
+   - Sparse (lots of dark space inside shell) → 1.5fold or earlier
+   - Moderate (some dark space) → 2fold
+   - Dense (shell mostly filled, bright) → pretzel
+
+Respond with JSON:
+{
+  "stage": "early|bean|comma|1.5fold|2fold|pretzel|hatching|hatched|no_object",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation"
+}"""
+
+_SCIENTIFIC_ANALYSIS = (
+    "Analyze: (1) How much of the eggshell is filled with signal? "
+    "(2) How many parallel body segments are visible? "
+    "(3) Which reference images match best? Then classify."
+)
+_TEMPORAL_ANALYSIS = (
+    "Compare this image to the reference images above. Which stage's references "
+    "does it most closely match? Classify accordingly."
+)
+
+
+def _is_scientific(frame: FrameInput) -> bool:
+    """Scientific prompt for 2fold/pretzel, temporal otherwise. Matches harness/solvers/hybrid.py."""
+    return frame.last_stage in {Stage.TWO_FOLD, Stage.PRETZEL}
+
+
+def _system_for(frame: FrameInput) -> str:
+    return SCIENTIFIC_SYSTEM if _is_scientific(frame) else TEMPORAL_SYSTEM
+
+
+def _user_blocks(frame: FrameInput) -> list[dict]:
+    """Same structure as hybrid, minus the defer-to-previous anchor sentences."""
+    blocks: list[dict] = [model.text_block(f"\n=== CLASSIFY EMBRYO AT T{frame.timepoint} ===")]
+    if frame.history_text:
+        blocks.append(model.text_block(frame.history_text))
+        last = frame.last_stage.value if frame.last_stage else "early"
+        blocks.append(
+            model.text_block(
+                f"The most recent observation was '{last}'. "
+                f"When uncertain, prefer the earlier stage."
+            )
+        )
+    blocks.append(model.image_block(frame.image_b64))
+    blocks.append(model.text_block(_SCIENTIFIC_ANALYSIS if _is_scientific(frame) else _TEMPORAL_ANALYSIS))
+    return blocks
+
+
+SOLVER = Solver(name="hybrid_nodefer", system=_system_for, tools=(), max_steps=1, user_blocks=_user_blocks)

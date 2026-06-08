@@ -27,4 +27,11 @@ benchmark = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["gently_perception*"]
+include = ["gently_perception*", "harness*"]
+
+[tool.pyright]
+extraPaths = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

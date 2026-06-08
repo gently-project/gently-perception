@@ -25,6 +25,10 @@ paper/*.pdf
 .DS_Store
 Thumbs.db
 
+# harness
+runs/
+data/render_cache/
+baseline.lock
 # Editable-install build artifact
 *.egg-info/
 

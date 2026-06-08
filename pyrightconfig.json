@@ -1,0 +1,6 @@
+{
+  "extraPaths": ["."],
+  "include": ["harness", "tests"],
+  "reportMissingImports": "none",
+  "reportAttributeAccessIssue": "warning"
+}
