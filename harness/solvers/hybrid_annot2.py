@@ -6,10 +6,12 @@ shell-filling, vigorously moving pretzel was called "hatching", and history
 anchoring then locked the streak in ("it has been hatching for 2 frames").
 
 Two-part fix, both prompts:
-1. Duration argument kills the trigger — hatching is a near-instant event
-   (rupture, exit, empty shell within a frame or two), while late pretzel
-   presses against and deforms the shell and wriggles WITHIN it for a long
-   time, which mimics emergence.
+1. Cadence argument kills the trigger — hatching takes 2-3 minutes and this
+   series is imaged every ~4 minutes, so hatching spans at most a frame or
+   two (and may be skipped entirely), while late pretzel presses against and
+   deforms the shell and wriggles WITHIN it for a long time, which mimics
+   emergence. Note this is sampling-dependent: at a 20-second cadence the
+   same event would span ~6 frames.
 2. Explicit cascade breaker — a multi-frame "hatching" streak in the history
    is self-contradictory; treat it as evidence the earlier calls were wrong
    rather than something to continue.
@@ -36,14 +38,15 @@ _NEW_TMP_RULE = """\
 5. **Late pretzel vs hatching.** The pretzel stage is long-lasting, and near \
 its end the worm moves vigorously WITHIN the eggshell — pressing against it, \
 deforming it, and changing pose between frames. This mimics emergence but is \
-still pretzel. Hatching, by contrast, is nearly instantaneous: the shell \
-ruptures, the worm exits, and within a frame or two you see a thin worm \
-clearly OUTSIDE the shell or an empty/partial shell. If the bright mass is \
-still shell-sized and shell-shaped, nothing has hatched. A history showing \
-several consecutive "hatching" observations is self-contradictory — hatching \
-completes almost immediately, so a long streak means those earlier calls \
-were wrong; re-examine against the shell outline instead of continuing the \
-streak."""
+still pretzel. Hatching itself takes only 2-3 minutes, and the frames in \
+this series are about 4 minutes apart — so hatching appears in AT MOST one \
+or two frames, and may be skipped entirely (pretzel in one frame, a thin \
+worm clearly OUTSIDE the shell or an empty/partial shell in the next). If \
+the bright mass is still shell-sized and shell-shaped, nothing has hatched. \
+A history showing several consecutive "hatching" observations is therefore \
+self-contradictory at this frame rate — a long streak means those earlier \
+calls were wrong; re-examine against the shell outline instead of continuing \
+the streak."""
 
 _OLD_SCI_TEXT = """\
 **HATCHING/HATCHED**: The worm is emerging or has left the eggshell — a thin \
@@ -51,13 +54,14 @@ elongated worm OUTSIDE the eggshell boundary, or an empty shell."""
 
 _NEW_SCI_TEXT = """\
 **HATCHING/HATCHED**: The worm is emerging or has left the eggshell — a thin \
-elongated worm OUTSIDE the eggshell boundary, or an empty shell. Hatching is \
-nearly instantaneous (rupture → exit → empty shell within a frame or two). \
-Late pretzel moves vigorously WITHIN the shell, pressing against and \
-deforming it — that mimics emergence but is still pretzel as long as the \
-bright mass stays shell-sized and shell-shaped. A multi-frame "hatching" \
-streak in the history is self-contradictory; treat it as evidence the \
-earlier calls were wrong rather than something to continue."""
+elongated worm OUTSIDE the eggshell boundary, or an empty shell. Hatching \
+takes only 2-3 minutes and frames here are about 4 minutes apart, so it \
+appears in at most one or two frames and may be skipped entirely. Late \
+pretzel moves vigorously WITHIN the shell, pressing against and deforming \
+it — that mimics emergence but is still pretzel as long as the bright mass \
+stays shell-sized and shell-shaped. A multi-frame "hatching" streak in the \
+history is therefore self-contradictory at this frame rate; treat it as \
+evidence the earlier calls were wrong rather than something to continue."""
 
 TEMPORAL_SYSTEM = _TMP_BASE.replace(_OLD_TMP_RULE, _NEW_TMP_RULE)
 SCIENTIFIC_SYSTEM = _SCI_BASE.replace(_OLD_SCI_TEXT, _NEW_SCI_TEXT)
