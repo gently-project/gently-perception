@@ -12,6 +12,15 @@ causes of the MIP attempts addressed:
 
 Two views per frame (annotator default pose + his tail-visibility pose),
 ~50ms each cached.
+
+RESULT (embryos 5-8, claude-opus-4-6, 3 seeds): exact 66.5% +/- 4.0
+(seeds 68.4/69.2/62.0), adjacent 85.2% — worse than hybrid_annot2's
+69.5 +/- 0.2 and the highest variance of the annot line. 2fold dropped
+26 -> 17.5 and pretzel destabilized (65.3 +/- 9.7). Third negative result
+for extra static views; with projection-collapse ruled out by the
+raymarcher, the remaining explanation is that additional static images
+dilute attention rather than add usable evidence on this task. Kept in
+the registry for reference; hybrid_annot2 remains the production solver.
 """
 from harness.core import model
 from harness.core.solver import Solver
