@@ -66,8 +66,11 @@ def view3d(
     yaw_deg: Annotated[int, Range(-180, 181)],
     pitch_deg: Annotated[int, Range(-90, 91)] = 0,
     threshold: Annotated[int, Range(5, 81)] = 30,
+    zoom_pct: Annotated[int, Range(100, 401)] = 100,
+    center_x_pct: Annotated[int, Range(0, 101)] = 50,
+    center_y_pct: Annotated[int, Range(0, 101)] = 50,
 ) -> ImageResult:
-    """Render the embryo volume in 3D from a camera angle you choose.
+    """Render the embryo volume in 3D — rotate, zoom, and center like the annotator's viewer.
 
     This is the same 3D viewer the human annotator used: a true volume render
     with depth — nearer structure occludes farther structure, so overlapping
@@ -76,7 +79,11 @@ def view3d(
     (positive = view more from above); both are relative to the annotator's
     default working pose. threshold sets the intensity cutoff (default 30 =
     the annotator's; raise it to peel away dim outer signal and expose
-    internal fold structure).
+    internal fold structure). zoom_pct magnifies (200 = 2x, 400 = 4x) around
+    the point (center_x_pct, center_y_pct), given as percentages of the
+    current view's width/height — pick the point from a previous render of
+    the SAME angle, e.g. zoom into where the tail tip or a suspected fold
+    crossing is.
     """
     global _ctx
     if _ctx is None:
@@ -86,9 +93,22 @@ def view3d(
     vol_u8 = ((vol - lo) / max(hi - lo, 1.0) * 255.0).astype(np.uint8)
     with Renderer(vol_u8, ctx=_ctx) as r:
         rgba = r.render(
-            CameraParams(quaternion=_pose(yaw_deg, pitch_deg), threshold=float(threshold))
+            CameraParams(
+                quaternion=_pose(yaw_deg, pitch_deg),
+                threshold=float(threshold),
+                image_size=(1024, 1024),  # render hi-res so zoom crops stay sharp
+            )
         )
-    return ImageResult(
-        b64=array_to_b64(_display(rgba), target_long_edge=512),
-        caption=f"3D view yaw={yaw_deg}° pitch={pitch_deg}° threshold={threshold}",
-    )
+    img = _display(rgba)
+    if zoom_pct > 100:
+        h, w = img.shape
+        win_h, win_w = int(h * 100 / zoom_pct), int(w * 100 / zoom_pct)
+        cy = int(h * center_y_pct / 100)
+        cx = int(w * center_x_pct / 100)
+        y0 = min(max(cy - win_h // 2, 0), h - win_h)
+        x0 = min(max(cx - win_w // 2, 0), w - win_w)
+        img = img[y0 : y0 + win_h, x0 : x0 + win_w]
+    caption = f"3D view yaw={yaw_deg}° pitch={pitch_deg}° threshold={threshold}"
+    if zoom_pct > 100:
+        caption += f" zoom={zoom_pct}% @({center_x_pct}%,{center_y_pct}%)"
+    return ImageResult(b64=array_to_b64(img, target_long_edge=512), caption=caption)

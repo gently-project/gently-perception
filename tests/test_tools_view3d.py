@@ -53,3 +53,17 @@ def test_rotation_changes_view():
 def test_caption_reports_params():
     out = view3d(_asym_volume(), yaw_deg=-30, pitch_deg=15, threshold=50)
     assert "yaw=-30" in out.caption and "pitch=15" in out.caption and "threshold=50" in out.caption
+
+
+def test_zoom_crops_around_center():
+    vol = _asym_volume()
+    full = view3d(vol, yaw_deg=0)
+    corner = view3d(vol, yaw_deg=0, zoom_pct=300, center_x_pct=10, center_y_pct=10)
+    middle = view3d(vol, yaw_deg=0, zoom_pct=300, center_x_pct=50, center_y_pct=50)
+    assert corner.b64 != middle.b64 != full.b64
+    assert "zoom=300%" in corner.caption
+
+
+def test_zoom_100_has_no_crop_caption():
+    out = view3d(_asym_volume(), yaw_deg=0, zoom_pct=100)
+    assert "zoom=" not in out.caption
