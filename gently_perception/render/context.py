@@ -23,8 +23,21 @@ _ALLOW_CPU_ENV = "GENTLY_PERCEPTION_ALLOW_CPU"
 
 
 def make_context(allow_cpu: bool = False) -> moderngl.Context:
-    """Create a standalone moderngl context, refusing CPU fallback by default."""
-    ctx = moderngl.create_context(standalone=True)
+    """Create a standalone moderngl context, refusing CPU fallback by default.
+
+    Tries the platform default backend first (X11 on Linux desktops), then
+    EGL, which is what works on headless machines (CI, remote boxes).
+    """
+    try:
+        ctx = moderngl.create_context(standalone=True)
+    except Exception as default_err:  # glcontext raises bare Exception for backend failures
+        try:
+            ctx = moderngl.create_context(standalone=True, backend="egl")
+        except Exception as egl_err:
+            raise RuntimeError(
+                f"No usable GL backend: default backend failed ({default_err}); "
+                f"EGL failed ({egl_err})."
+            ) from egl_err
     info = ctx.info
     renderer = (info.get("GL_RENDERER") or "").lower()
     vendor = (info.get("GL_VENDOR") or "").lower()

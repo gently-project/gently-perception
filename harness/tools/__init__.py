@@ -266,5 +266,6 @@ def _cached(spec: ToolSpec, frame: FrameInput | None, params: dict, compute: Cal
 # (Kept at the bottom to avoid circular imports — tool modules import `tool` from here.)
 from harness.tools import measure as _measure  # noqa: E402,F401
 from harness.tools import prev_frame as _prev  # noqa: E402,F401
+from harness.tools import view3d as _view3d  # noqa: E402,F401
 from harness.tools import z_slice as _z_slice  # noqa: E402,F401
 from harness.tools import zoom as _zoom  # noqa: E402,F401

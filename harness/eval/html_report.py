@@ -15,13 +15,15 @@ import importlib
 import io
 import json
 import os
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
-from harness.core.render import cached_render
-from harness.core.types import STAGE_ORDER, Stage
+from harness.core.render import cached_render, cached_tool_result, load_volume
+from harness.core.types import STAGE_ORDER, ImageResult, Stage
 from harness.eval import report as text_report
 from harness.eval.score import score_run
 from harness.io.events import read_events
@@ -30,6 +32,14 @@ from harness.io.volumes import OfflineSource
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 THUMB_LONG_EDGE = 260
+
+_FS_UNSAFE = re.compile(r"[^A-Za-z0-9_\-]")
+
+
+def _fs_name(value: Any) -> str:
+    """Filesystem/URL-safe asset-name component. Embryo ids come from
+    events.jsonl, which may not be trusted (shared/downloaded run dirs)."""
+    return _FS_UNSAFE.sub("_", str(value))
 
 
 # --- Data assembly ----------------------------------------------------------
@@ -100,7 +110,7 @@ def _thumbnails(frames: list[dict[str, Any]], assets_dir: Path, volumes_dir: Pat
         key = (r["e"], r["t"])
         if key not in paths:
             continue
-        thumb = assets_dir / f"{r['e']}_T{r['t']:03d}.jpg"
+        thumb = assets_dir / f"{_fs_name(r['e'])}_T{int(r['t']):03d}.jpg"
         r["thumb"] = f"report_assets/{thumb.name}"
         if thumb.exists():
             continue
@@ -133,7 +143,7 @@ def _rotated_thumbnails(
             continue
         rot: list[dict[str, Any]] = []
         for angle in angles:
-            name = f"{r['e']}_T{r['t']:03d}_rot{int(angle)}.jpg"
+            name = f"{_fs_name(r['e'])}_T{int(r['t']):03d}_rot{int(angle)}.jpg"
             out = assets_dir / name
             rot.append({"a": int(angle), "src": f"report_assets/{name}"})
             if out.exists():
@@ -144,6 +154,50 @@ def _rotated_thumbnails(
                 img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
             img.save(out, format="JPEG", quality=80)
         r["rot"] = rot
+
+
+def _view3d_step_assets(frames: list[dict[str, Any]], run_dir: Path, volumes_dir: Path) -> None:
+    """Re-render every view3d step image from its recorded params.
+
+    The harness keys media files by model-turn index, so parallel tool calls
+    in one turn overwrite each other's image. view3d is deterministic, so the
+    recorded params are the authoritative source; renders hit the run's own
+    dispatch cache (same (volume, tool, params) key) and are cheap.
+    """
+    needs = [
+        (r, j, s)
+        for r in frames
+        for j, s in enumerate(r.get("steps", []))
+        if s.get("name") == "view3d" and s.get("params") is not None
+    ]
+    if not needs or not volumes_dir.exists():
+        return
+    from harness.tools import REGISTRY, _fill_defaults  # deferred: pulls in GL deps
+
+    spec = REGISTRY.get("view3d")
+    if spec is None:
+        return
+    paths = {(e, t): p for e, t, p in OfflineSource(volumes_dir)}
+    assets = run_dir / "report_assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    for r, j, s in needs:
+        vol_ref = paths.get((r["e"], r["t"]))
+        if vol_ref is None:
+            continue
+        params = s["params"]
+
+        def compute(vol_ref: Path = vol_ref, params: dict[str, Any] = params) -> str:
+            result = spec.fn(load_volume(vol_ref), **_fill_defaults(spec, params))
+            assert isinstance(result, ImageResult)
+            return result.b64
+
+        name = f"{_fs_name(r['e'])}_T{int(r['t']):03d}_nav{j}.jpg"
+        out = assets / name
+        assert out.resolve().is_relative_to(assets.resolve())
+        if not out.exists():
+            b64 = cached_tool_result(Path(vol_ref), "view3d", params, compute)
+            out.write_bytes(base64.b64decode(b64))
+        s["img"] = f"report_assets/{name}"
 
 
 def _summary(run_dir: Path, gt: GroundTruth) -> dict[str, Any]:
@@ -305,8 +359,18 @@ def _embryo_span(ids: list[str]) -> str:
     return "e" + ",".join(str(n) for n in nums)
 
 
+def _week_prefix(ts: str) -> str:
+    """'20260609-...' → '[Week of 6/8]' (the Monday of that run's week)."""
+    try:
+        run_day = datetime.strptime(ts[:8], "%Y%m%d").date()
+    except ValueError:
+        return ""
+    monday = run_day - timedelta(days=run_day.weekday())
+    return f"[Week of {monday.month}/{monday.day}]"
+
+
 def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
-    """Human-readable dropdown label: what the solver change was, dataset, date."""
+    """Human-readable dropdown label: week group, what the change was, dataset, date."""
     solver, _model, ts = d.parts[-3:]
     desc = solver
     try:
@@ -321,7 +385,33 @@ def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
     except Exception:
         pass
     date = f"{ts[4:6]}/{ts[6:8]}" if len(ts) >= 8 else ts
-    return " · ".join(x for x in (desc, span, date) if x)
+    body = " · ".join(x for x in (desc, span, date) if x)
+    week = _week_prefix(ts)
+    return f"{week} {body}" if week else body
+
+
+def _experiment_description(solver_name: str) -> dict[str, Any]:
+    """The solver docstring's full pre-RESULT content — what was tried and why.
+
+    Returns {"paras": [...], "setup": "..."}. RESULT paragraphs are excluded;
+    the report's own numbers speak for the outcome.
+    """
+    try:
+        mod = importlib.import_module(f"harness.solvers.{solver_name}")
+    except Exception:
+        return {"paras": [], "setup": ""}
+    paras: list[str] = []
+    for block in (mod.__doc__ or "").strip().split("\n\n"):
+        if block.strip().startswith("RESULT"):
+            break
+        paras.append(" ".join(line.strip() for line in block.splitlines()))
+    setup = ""
+    solver = getattr(mod, "SOLVER", None)
+    if solver is not None:
+        tools = ", ".join(solver.tools) if solver.tools else "none"
+        mode = "one-shot" if solver.max_steps == 1 else f"agentic, {solver.max_steps} steps max"
+        setup = f"solver {solver.name} · tools: {tools} · {mode}"
+    return {"paras": paras, "setup": setup}
 
 
 def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
@@ -339,7 +429,7 @@ def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
     }
     dirs = {p.parent for p in runs_root.glob("*/*/*/report.html")} | {run_dir}
     out: list[dict[str, Any]] = []
-    for d in sorted(dirs, key=lambda p: (p.parts[-3], p.parts[-1]), reverse=True):
+    for d in sorted(dirs, key=lambda p: p.parts[-1], reverse=True):  # newest first → weeks cluster
         out.append(
             {
                 "label": _run_label(d, gt_embryos),
@@ -369,11 +459,14 @@ def generate(
     vols = volumes_dir or (_REPO_ROOT / "data" / "volumes")
     _thumbnails(frames, run_dir / "report_assets", vols)
     _rotated_thumbnails(frames, run_dir / "report_assets", vols, str(config.get("solver", "")))
+    _view3d_step_assets(frames, run_dir, vols)
 
     data: dict[str, Any] = {
         "config": config,
         "run_dir": str(run_dir),
+        "experiment": _experiment_description(str(config.get("solver", ""))),
         "runs": _sibling_runs(run_dir),
+        "findings_href": os.path.relpath(_REPO_ROOT / "runs" / "findings.html", run_dir.resolve()),
         "seed": seed,
         "summary": _summary(run_dir, gt),
         "clusters": _failure_clusters(run_dir, gt, detail_seed=seed),
@@ -485,9 +578,12 @@ table.cm td.zero{color:#3a3f4a}
 .rotRow figure{flex:1;margin:0}
 .rotRow img{width:100%;border-radius:5px;background:#000;display:block}
 .rotRow figcaption{font:10px var(--mono);color:var(--dim);letter-spacing:.08em;text-align:center;margin-top:5px;text-transform:uppercase}
-.step{border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:11px 14px;margin-bottom:10px;font:12px var(--mono)}
-.step .sn{color:var(--accent);margin-right:8px}
-.step img{max-width:340px;display:block;margin-top:9px;border-radius:4px;background:#000}
+.navHdr{font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin:18px 0 10px}
+.navStrip{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px}
+.navStrip .step{flex:0 0 auto;width:300px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:10px 12px;font:11px/1.5 var(--mono)}
+.step .sn{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;background:var(--accent);color:#000;border-radius:9px;font-weight:700;margin-right:8px}
+.step .cap{color:var(--bright)}
+.step img{width:100%;display:block;margin-top:9px;border-radius:5px;background:#000}
 .step .val{color:var(--bright);font-weight:600}
 .step .err{color:var(--bad)}
 .reason{font:13px/1.6 var(--sans);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:13px 16px;white-space:pre-wrap}
@@ -500,13 +596,24 @@ table.cm td.zero{color:#3a3f4a}
 .runSel{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
 .runSel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:12px var(--mono);max-width:380px;cursor:pointer}
 .runSel select:hover{border-color:var(--accent)}
+.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--line)}
+.tabs a,.tabs .tab{font:12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);text-decoration:none;padding:8px 16px;border:1px solid transparent;border-bottom:none;border-radius:7px 7px 0 0}
+.tabs a:hover{color:var(--bright)}
+.tabs .on{color:var(--bright);background:var(--panel2);border-color:var(--line)}
+.expDesc{margin:18px 0 0;padding:16px 20px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font:13px/1.7 var(--sans);color:var(--txt);max-width:980px}
+.expDesc::before{content:"experiment";display:block;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+.expDesc p{margin:0 0 10px}
+.expDesc p:last-of-type{margin-bottom:0}
+.expSetup{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font:11px var(--mono);color:var(--dim);letter-spacing:.04em}
 </style>
 </head>
 <body>
+<div class="tabs"><span class="tab on">report</span><a id="findingsTab" href="#">findings</a></div>
 <div class="hdr">
   <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
   <label class="runSel" id="runSelWrap">run <select id="runSel"></select></label>
 </div>
+<div class="expDesc" id="expDesc" hidden></div>
 <section><h2>Summary</h2><div class="kpis" id="kpis"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap"><div style="flex:1;min-width:300px"><div class="bars" id="bars"></div></div>
   <div><div style="font:11px var(--mono);color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Confusion (true ↓ / predicted →)</div><div id="cm"></div></div></div>
@@ -541,6 +648,17 @@ const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 // header
 document.getElementById('title').textContent=(D.config.solver||'run')+' · '+(D.config.model||'');
 document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' detail  ·  '+D.summary.n_seeds+' seed(s) aggregated';
+
+// tabs
+if(D.findings_href)document.getElementById('findingsTab').href=D.findings_href;
+
+// experiment description
+if(D.experiment&&D.experiment.paras&&D.experiment.paras.length){
+  const ed=document.getElementById('expDesc');
+  for(const p of D.experiment.paras){const el=document.createElement('p');el.textContent=p;ed.appendChild(el);}
+  if(D.experiment.setup){const su=document.createElement('div');su.className='expSetup';su.textContent=D.experiment.setup;ed.appendChild(su);}
+  ed.hidden=false;
+}
 
 // run switcher
 const runSel=document.getElementById('runSel');
@@ -641,14 +759,23 @@ document.getElementById('cmpBody').innerHTML=
 let cur=-1;
 function open(i){cur=i;const f=F[i];
 let h='<div class="head"><span class="id">'+f.e+' · T'+f.t+'</span><span class="nav">'+(i+1)+' / '+F.length+' · ←→ navigate · esc close</span></div>';
-if(f.thumb)h+='<img class="main" src="'+f.thumb+'">';
-if(f.rot&&f.rot.length)h+='<div class="rotRow">'+f.rot.map(r=>'<figure><img loading="lazy" src="'+r.src+'"><figcaption>rotated '+r.a+'°</figcaption></figure>').join('')+'</div>';
+if(f.thumb)h+='<img class="main" src="'+esc(f.thumb)+'">';
+if(f.rot&&f.rot.length)h+='<div class="rotRow">'+f.rot.map(r=>'<figure><img loading="lazy" src="'+esc(r.src)+'"><figcaption>rotated '+r.a+'°</figcaption></figure>').join('')+'</div>';
 h+='<div class="vs" style="justify-content:flex-end;margin-bottom:14px"><span class="tag '+(f.ok?'gt':'pred')+'">pred '+f.pred+'</span><span class="tag gt">gt '+f.gt+'</span><span class="tag">'+(f.tokens||0)+' tok</span></div>';
-(f.steps||[]).forEach((s,j)=>{h+='<div class="step"><span class="sn">'+(j+1)+'</span>'+s.name+'('+esc(JSON.stringify(s.params))+')'+
-  (s.error?' → <span class="err">'+esc(s.error)+'</span>':'')+
-  (s.value!==undefined?' → <span class="val">'+s.value+'</span> <span style="color:var(--dim)">'+esc(s.note)+'</span>':'')+
-  (s.img?'<img loading="lazy" src="'+s.img+'">':'')+'</div>'});
-h+='<div class="reason">'+esc(f.reasoning||f.err||'(no reasoning)')+'</div>';
+function stepCap(s){
+  if(s.name==='view3d'){const p=s.params||{};let c='rotate → yaw '+(p.yaw_deg??0)+'° · pitch '+(p.pitch_deg??0)+'°';
+    if(p.threshold!==undefined&&p.threshold!==30)c+=' · threshold '+p.threshold;
+    if(p.zoom_pct&&p.zoom_pct>100)c+=' · zoom '+p.zoom_pct+'% @ ('+(p.center_x_pct??50)+'%, '+(p.center_y_pct??50)+'%)';
+    return c;}
+  return s.name+'('+Object.entries(s.params||{}).map(([k,v])=>k+'='+v).join(', ')+')';}
+if((f.steps||[]).length){
+  h+='<div class="navHdr">'+( (f.steps.some(s=>s.name==='view3d'))?'3D navigation — how the model explored this frame':'tool calls')+'</div><div class="navStrip">';
+  f.steps.forEach((s,j)=>{h+='<div class="step"><span class="sn">'+(j+1)+'</span><span class="cap">'+esc(stepCap(s))+'</span>'+
+    (s.error?'<div class="err">'+esc(s.error)+'</div>':'')+
+    (s.value!==undefined?'<div>→ <span class="val">'+s.value+'</span> <span style="color:var(--dim)">'+esc(s.note)+'</span></div>':'')+
+    (s.img?'<img loading="lazy" src="'+esc(s.img)+'">':'')+'</div>'});
+  h+='</div>';}
+h+='<div class="navHdr">model response</div><div class="reason">'+esc(f.reasoning||f.err||'(no reasoning)')+'</div>';
 if(f.override)h+='<div class="note">⚠ verify override: '+esc(f.override)+'</div>';
 if(f.budget_exhausted)h+='<div class="note">⚠ tool budget exhausted — classify was forced</div>';
 document.getElementById('modalBox').innerHTML=h;
@@ -662,3 +789,87 @@ if(ev.key==='Escape')close();else if(ev.key==='ArrowRight'&&cur<F.length-1)open(
 </body>
 </html>
 """
+
+
+# --- Findings page ------------------------------------------------------------
+
+_FINDINGS_CSS = """
+body{max-width:1060px;margin:0 auto;padding:34px 28px 80px}
+.fd h1{font:600 26px var(--sans);color:var(--bright);margin:14px 0 6px}
+.fd h2{font:600 19px var(--sans);color:var(--bright);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+.fd h3{font:600 15px var(--sans);color:var(--bright);margin:24px 0 8px}
+.fd p{font:14px/1.75 var(--sans);color:var(--txt);margin:0 0 14px}
+.fd li{font:14px/1.75 var(--sans);color:var(--txt);margin:0 0 10px}
+.fd table{border-collapse:collapse;margin:14px 0 20px;font:12.5px var(--mono)}
+.fd th{text-align:left;color:var(--dim);font-weight:500;letter-spacing:.05em;padding:7px 14px 7px 0;border-bottom:1px solid var(--line)}
+.fd td{padding:7px 14px 7px 0;border-bottom:1px solid var(--line);color:var(--txt)}
+.fd strong{color:var(--bright)}
+.fd code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font:12px var(--mono)}
+"""
+
+
+def _md_to_html(md: str) -> str:
+    """Tiny renderer for FINDINGS.md — headings, bold, code, tables, lists, paragraphs."""
+
+    def inline(s: str) -> str:
+        s = s.replace("&", "&amp;").replace("<", "&lt;")
+        s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        return s
+
+    out: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not all(set(c) <= {"-", " ", ":"} for c in cells):  # skip separator row
+                    rows.append(cells)
+                i += 1
+            head, *body = rows
+            out.append("<table><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head) + "</tr>")
+            out.extend("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in body)
+            out.append("</table>")
+            continue
+        if m := re.match(r"^(#{1,3}) (.*)", line):
+            out.append(f"<h{len(m[1])}>{inline(m[2])}</h{len(m[1])}>")
+        elif re.match(r"^\d+\. |^- ", line):
+            tag = "ol" if line[0].isdigit() else "ul"
+            items: list[str] = []
+            while i < len(lines) and (re.match(r"^\d+\. |^- ", lines[i]) or (lines[i].startswith("   ") and items)):
+                if re.match(r"^\d+\. |^- ", lines[i]):
+                    items.append(re.sub(r"^\d+\. |^- ", "", lines[i]))
+                else:
+                    items[-1] += " " + lines[i].strip()
+                i += 1
+            out.append(f"<{tag}>" + "".join(f"<li>{inline(it)}</li>" for it in items) + f"</{tag}>")
+            continue
+        elif line.strip():
+            para = [line]
+            while i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r"^#|^\||^\d+\. |^- ", lines[i + 1]):
+                i += 1
+                para.append(lines[i])
+            out.append(f"<p>{inline(' '.join(p.strip() for p in para))}</p>")
+        i += 1
+    return "\n".join(out)
+
+
+def generate_findings(runs_root: Path | None = None, md_path: Path | None = None) -> Path:
+    """Render docs/FINDINGS.md into runs/findings.html (shares report styling)."""
+    runs_root = runs_root or (_REPO_ROOT / "runs")
+    md_path = md_path or (_REPO_ROOT / "docs" / "FINDINGS.md")
+    style = re.search(r"<style>(.*?)</style>", _TEMPLATE, re.S)
+    base_css = style.group(1) if style else ""
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'><title>findings</title>"
+        f"<style>{base_css}{_FINDINGS_CSS}</style></head><body>"
+        '<div class="tabs"><a href="javascript:history.back()">← report</a>'
+        '<span class="tab on">findings</span></div>'
+        f'<div class="fd">{_md_to_html(md_path.read_text())}</div></body></html>'
+    )
+    out = runs_root / "findings.html"
+    out.write_text(html)
+    return out

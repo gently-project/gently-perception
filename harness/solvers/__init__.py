@@ -1,6 +1,6 @@
 """Solver registry — explicit dict, not auto-discovery."""
 from harness.core.solver import Solver
-from harness.solvers import agentic_baseline, hybrid, hybrid_3dviews, hybrid_3dviews2, hybrid_annot, hybrid_nodefer, hybrid_noprior, minimal, scientific, temporal
+from harness.solvers import agentic_baseline, hybrid, hybrid_3dviews, hybrid_3dviews2, hybrid_agentic3d, hybrid_contrast3d, hybrid_explorer3d, hybrid_annot, hybrid_annot2, hybrid_annotviews, hybrid_nodefer, hybrid_noprior, hybrid_pairwise, hybrid_prevonly, minimal, scientific, temporal
 
 REGISTRY: dict[str, Solver] = {
     "minimal": minimal.SOLVER,
@@ -9,6 +9,13 @@ REGISTRY: dict[str, Solver] = {
     "hybrid": hybrid.SOLVER,
     "hybrid_nodefer": hybrid_nodefer.SOLVER,
     "hybrid_annot": hybrid_annot.SOLVER,
+    "hybrid_annot2": hybrid_annot2.SOLVER,
+    "hybrid_annotviews": hybrid_annotviews.SOLVER,
+    "hybrid_agentic3d": hybrid_agentic3d.SOLVER,
+    "hybrid_explorer3d": hybrid_explorer3d.SOLVER,
+    "hybrid_contrast3d": hybrid_contrast3d.SOLVER,
+    "hybrid_pairwise": hybrid_pairwise.SOLVER,
+    "hybrid_prevonly": hybrid_prevonly.SOLVER,
     "hybrid_3dviews": hybrid_3dviews.SOLVER,
     "hybrid_3dviews2": hybrid_3dviews2.SOLVER,
     "hybrid_noprior": hybrid_noprior.SOLVER,
