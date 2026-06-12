@@ -466,6 +466,7 @@ def generate(
         "run_dir": str(run_dir),
         "experiment": _experiment_description(str(config.get("solver", ""))),
         "runs": _sibling_runs(run_dir),
+        "findings_href": os.path.relpath(_REPO_ROOT / "runs" / "findings.html", run_dir.resolve()),
         "seed": seed,
         "summary": _summary(run_dir, gt),
         "clusters": _failure_clusters(run_dir, gt, detail_seed=seed),
@@ -595,6 +596,10 @@ table.cm td.zero{color:#3a3f4a}
 .runSel{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
 .runSel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:12px var(--mono);max-width:380px;cursor:pointer}
 .runSel select:hover{border-color:var(--accent)}
+.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--line)}
+.tabs a,.tabs .tab{font:12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);text-decoration:none;padding:8px 16px;border:1px solid transparent;border-bottom:none;border-radius:7px 7px 0 0}
+.tabs a:hover{color:var(--bright)}
+.tabs .on{color:var(--bright);background:var(--panel2);border-color:var(--line)}
 .expDesc{margin:18px 0 0;padding:16px 20px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font:13px/1.7 var(--sans);color:var(--txt);max-width:980px}
 .expDesc::before{content:"experiment";display:block;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
 .expDesc p{margin:0 0 10px}
@@ -603,6 +608,7 @@ table.cm td.zero{color:#3a3f4a}
 </style>
 </head>
 <body>
+<div class="tabs"><span class="tab on">report</span><a id="findingsTab" href="#">findings</a></div>
 <div class="hdr">
   <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
   <label class="runSel" id="runSelWrap">run <select id="runSel"></select></label>
@@ -642,6 +648,9 @@ const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 // header
 document.getElementById('title').textContent=(D.config.solver||'run')+' · '+(D.config.model||'');
 document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' detail  ·  '+D.summary.n_seeds+' seed(s) aggregated';
+
+// tabs
+if(D.findings_href)document.getElementById('findingsTab').href=D.findings_href;
 
 // experiment description
 if(D.experiment&&D.experiment.paras&&D.experiment.paras.length){
@@ -780,3 +789,87 @@ if(ev.key==='Escape')close();else if(ev.key==='ArrowRight'&&cur<F.length-1)open(
 </body>
 </html>
 """
+
+
+# --- Findings page ------------------------------------------------------------
+
+_FINDINGS_CSS = """
+body{max-width:1060px;margin:0 auto;padding:34px 28px 80px}
+.fd h1{font:600 26px var(--sans);color:var(--bright);margin:14px 0 6px}
+.fd h2{font:600 19px var(--sans);color:var(--bright);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+.fd h3{font:600 15px var(--sans);color:var(--bright);margin:24px 0 8px}
+.fd p{font:14px/1.75 var(--sans);color:var(--txt);margin:0 0 14px}
+.fd li{font:14px/1.75 var(--sans);color:var(--txt);margin:0 0 10px}
+.fd table{border-collapse:collapse;margin:14px 0 20px;font:12.5px var(--mono)}
+.fd th{text-align:left;color:var(--dim);font-weight:500;letter-spacing:.05em;padding:7px 14px 7px 0;border-bottom:1px solid var(--line)}
+.fd td{padding:7px 14px 7px 0;border-bottom:1px solid var(--line);color:var(--txt)}
+.fd strong{color:var(--bright)}
+.fd code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font:12px var(--mono)}
+"""
+
+
+def _md_to_html(md: str) -> str:
+    """Tiny renderer for FINDINGS.md — headings, bold, code, tables, lists, paragraphs."""
+
+    def inline(s: str) -> str:
+        s = s.replace("&", "&amp;").replace("<", "&lt;")
+        s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        return s
+
+    out: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not all(set(c) <= {"-", " ", ":"} for c in cells):  # skip separator row
+                    rows.append(cells)
+                i += 1
+            head, *body = rows
+            out.append("<table><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head) + "</tr>")
+            out.extend("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in body)
+            out.append("</table>")
+            continue
+        if m := re.match(r"^(#{1,3}) (.*)", line):
+            out.append(f"<h{len(m[1])}>{inline(m[2])}</h{len(m[1])}>")
+        elif re.match(r"^\d+\. |^- ", line):
+            tag = "ol" if line[0].isdigit() else "ul"
+            items: list[str] = []
+            while i < len(lines) and (re.match(r"^\d+\. |^- ", lines[i]) or (lines[i].startswith("   ") and items)):
+                if re.match(r"^\d+\. |^- ", lines[i]):
+                    items.append(re.sub(r"^\d+\. |^- ", "", lines[i]))
+                else:
+                    items[-1] += " " + lines[i].strip()
+                i += 1
+            out.append(f"<{tag}>" + "".join(f"<li>{inline(it)}</li>" for it in items) + f"</{tag}>")
+            continue
+        elif line.strip():
+            para = [line]
+            while i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r"^#|^\||^\d+\. |^- ", lines[i + 1]):
+                i += 1
+                para.append(lines[i])
+            out.append(f"<p>{inline(' '.join(p.strip() for p in para))}</p>")
+        i += 1
+    return "\n".join(out)
+
+
+def generate_findings(runs_root: Path | None = None, md_path: Path | None = None) -> Path:
+    """Render docs/FINDINGS.md into runs/findings.html (shares report styling)."""
+    runs_root = runs_root or (_REPO_ROOT / "runs")
+    md_path = md_path or (_REPO_ROOT / "docs" / "FINDINGS.md")
+    style = re.search(r"<style>(.*?)</style>", _TEMPLATE, re.S)
+    base_css = style.group(1) if style else ""
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'><title>findings</title>"
+        f"<style>{base_css}{_FINDINGS_CSS}</style></head><body>"
+        '<div class="tabs"><a href="javascript:history.back()">← report</a>'
+        '<span class="tab on">findings</span></div>'
+        f'<div class="fd">{_md_to_html(md_path.read_text())}</div></body></html>'
+    )
+    out = runs_root / "findings.html"
+    out.write_text(html)
+    return out
