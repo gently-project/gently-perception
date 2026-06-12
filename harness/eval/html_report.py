@@ -337,18 +337,28 @@ def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
     return f"{week} {body}" if week else body
 
 
-def _experiment_description(solver_name: str) -> str:
-    """First paragraph of the solver's docstring — what the experiment tried.
+def _experiment_description(solver_name: str) -> dict[str, Any]:
+    """The solver docstring's full pre-RESULT content — what was tried and why.
 
-    (Results paragraphs come later in the docstrings and are deliberately
-    excluded; the report's own numbers speak for the outcome.)
+    Returns {"paras": [...], "setup": "..."}. RESULT paragraphs are excluded;
+    the report's own numbers speak for the outcome.
     """
     try:
-        doc = importlib.import_module(f"harness.solvers.{solver_name}").__doc__ or ""
+        mod = importlib.import_module(f"harness.solvers.{solver_name}")
     except Exception:
-        return ""
-    first_para = doc.strip().split("\n\n")[0]
-    return " ".join(line.strip() for line in first_para.splitlines())
+        return {"paras": [], "setup": ""}
+    paras: list[str] = []
+    for block in (mod.__doc__ or "").strip().split("\n\n"):
+        if block.strip().startswith("RESULT"):
+            break
+        paras.append(" ".join(line.strip() for line in block.splitlines()))
+    setup = ""
+    solver = getattr(mod, "SOLVER", None)
+    if solver is not None:
+        tools = ", ".join(solver.tools) if solver.tools else "none"
+        mode = "one-shot" if solver.max_steps == 1 else f"agentic, {solver.max_steps} steps max"
+        setup = f"solver {solver.name} · tools: {tools} · {mode}"
+    return {"paras": paras, "setup": setup}
 
 
 def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
@@ -528,8 +538,11 @@ table.cm td.zero{color:#3a3f4a}
 .runSel{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
 .runSel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:12px var(--mono);max-width:380px;cursor:pointer}
 .runSel select:hover{border-color:var(--accent)}
-.expDesc{margin:18px 0 0;padding:14px 18px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font:13px/1.65 var(--sans);color:var(--txt);max-width:980px}
-.expDesc::before{content:"experiment";display:block;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}
+.expDesc{margin:18px 0 0;padding:16px 20px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font:13px/1.7 var(--sans);color:var(--txt);max-width:980px}
+.expDesc::before{content:"experiment";display:block;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+.expDesc p{margin:0 0 10px}
+.expDesc p:last-of-type{margin-bottom:0}
+.expSetup{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font:11px var(--mono);color:var(--dim);letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -574,7 +587,12 @@ document.getElementById('title').textContent=(D.config.solver||'run')+' · '+(D.
 document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' detail  ·  '+D.summary.n_seeds+' seed(s) aggregated';
 
 // experiment description
-if(D.experiment){const ed=document.getElementById('expDesc');ed.textContent=D.experiment;ed.hidden=false;}
+if(D.experiment&&D.experiment.paras&&D.experiment.paras.length){
+  const ed=document.getElementById('expDesc');
+  for(const p of D.experiment.paras){const el=document.createElement('p');el.textContent=p;ed.appendChild(el);}
+  if(D.experiment.setup){const su=document.createElement('div');su.className='expSetup';su.textContent=D.experiment.setup;ed.appendChild(su);}
+  ed.hidden=false;
+}
 
 // run switcher
 const runSel=document.getElementById('runSel');
