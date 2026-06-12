@@ -15,14 +15,15 @@ import importlib
 import io
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
-from harness.core.render import cached_render
-from harness.core.types import STAGE_ORDER, Stage
+from harness.core.render import cached_render, cached_tool_result, load_volume
+from harness.core.types import STAGE_ORDER, ImageResult, Stage
 from harness.eval import report as text_report
 from harness.eval.score import score_run
 from harness.io.events import read_events
@@ -31,6 +32,14 @@ from harness.io.volumes import OfflineSource
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 THUMB_LONG_EDGE = 260
+
+_FS_UNSAFE = re.compile(r"[^A-Za-z0-9_\-]")
+
+
+def _fs_name(value: Any) -> str:
+    """Filesystem/URL-safe asset-name component. Embryo ids come from
+    events.jsonl, which may not be trusted (shared/downloaded run dirs)."""
+    return _FS_UNSAFE.sub("_", str(value))
 
 
 # --- Data assembly ----------------------------------------------------------
@@ -101,7 +110,7 @@ def _thumbnails(frames: list[dict[str, Any]], assets_dir: Path, volumes_dir: Pat
         key = (r["e"], r["t"])
         if key not in paths:
             continue
-        thumb = assets_dir / f"{r['e']}_T{r['t']:03d}.jpg"
+        thumb = assets_dir / f"{_fs_name(r['e'])}_T{int(r['t']):03d}.jpg"
         r["thumb"] = f"report_assets/{thumb.name}"
         if thumb.exists():
             continue
@@ -134,7 +143,7 @@ def _rotated_thumbnails(
             continue
         rot: list[dict[str, Any]] = []
         for angle in angles:
-            name = f"{r['e']}_T{r['t']:03d}_rot{int(angle)}.jpg"
+            name = f"{_fs_name(r['e'])}_T{int(r['t']):03d}_rot{int(angle)}.jpg"
             out = assets_dir / name
             rot.append({"a": int(angle), "src": f"report_assets/{name}"})
             if out.exists():
@@ -145,6 +154,50 @@ def _rotated_thumbnails(
                 img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
             img.save(out, format="JPEG", quality=80)
         r["rot"] = rot
+
+
+def _view3d_step_assets(frames: list[dict[str, Any]], run_dir: Path, volumes_dir: Path) -> None:
+    """Re-render every view3d step image from its recorded params.
+
+    The harness keys media files by model-turn index, so parallel tool calls
+    in one turn overwrite each other's image. view3d is deterministic, so the
+    recorded params are the authoritative source; renders hit the run's own
+    dispatch cache (same (volume, tool, params) key) and are cheap.
+    """
+    needs = [
+        (r, j, s)
+        for r in frames
+        for j, s in enumerate(r.get("steps", []))
+        if s.get("name") == "view3d" and s.get("params") is not None
+    ]
+    if not needs or not volumes_dir.exists():
+        return
+    from harness.tools import REGISTRY, _fill_defaults  # deferred: pulls in GL deps
+
+    spec = REGISTRY.get("view3d")
+    if spec is None:
+        return
+    paths = {(e, t): p for e, t, p in OfflineSource(volumes_dir)}
+    assets = run_dir / "report_assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    for r, j, s in needs:
+        vol_ref = paths.get((r["e"], r["t"]))
+        if vol_ref is None:
+            continue
+        params = s["params"]
+
+        def compute(vol_ref: Path = vol_ref, params: dict[str, Any] = params) -> str:
+            result = spec.fn(load_volume(vol_ref), **_fill_defaults(spec, params))
+            assert isinstance(result, ImageResult)
+            return result.b64
+
+        name = f"{_fs_name(r['e'])}_T{int(r['t']):03d}_nav{j}.jpg"
+        out = assets / name
+        assert out.resolve().is_relative_to(assets.resolve())
+        if not out.exists():
+            b64 = cached_tool_result(Path(vol_ref), "view3d", params, compute)
+            out.write_bytes(base64.b64decode(b64))
+        s["img"] = f"report_assets/{name}"
 
 
 def _summary(run_dir: Path, gt: GroundTruth) -> dict[str, Any]:
@@ -406,6 +459,7 @@ def generate(
     vols = volumes_dir or (_REPO_ROOT / "data" / "volumes")
     _thumbnails(frames, run_dir / "report_assets", vols)
     _rotated_thumbnails(frames, run_dir / "report_assets", vols, str(config.get("solver", "")))
+    _view3d_step_assets(frames, run_dir, vols)
 
     data: dict[str, Any] = {
         "config": config,
@@ -523,9 +577,12 @@ table.cm td.zero{color:#3a3f4a}
 .rotRow figure{flex:1;margin:0}
 .rotRow img{width:100%;border-radius:5px;background:#000;display:block}
 .rotRow figcaption{font:10px var(--mono);color:var(--dim);letter-spacing:.08em;text-align:center;margin-top:5px;text-transform:uppercase}
-.step{border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:11px 14px;margin-bottom:10px;font:12px var(--mono)}
-.step .sn{color:var(--accent);margin-right:8px}
-.step img{max-width:340px;display:block;margin-top:9px;border-radius:4px;background:#000}
+.navHdr{font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin:18px 0 10px}
+.navStrip{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px}
+.navStrip .step{flex:0 0 auto;width:300px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:10px 12px;font:11px/1.5 var(--mono)}
+.step .sn{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;background:var(--accent);color:#000;border-radius:9px;font-weight:700;margin-right:8px}
+.step .cap{color:var(--bright)}
+.step img{width:100%;display:block;margin-top:9px;border-radius:5px;background:#000}
 .step .val{color:var(--bright);font-weight:600}
 .step .err{color:var(--bad)}
 .reason{font:13px/1.6 var(--sans);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:13px 16px;white-space:pre-wrap}
@@ -693,14 +750,23 @@ document.getElementById('cmpBody').innerHTML=
 let cur=-1;
 function open(i){cur=i;const f=F[i];
 let h='<div class="head"><span class="id">'+f.e+' · T'+f.t+'</span><span class="nav">'+(i+1)+' / '+F.length+' · ←→ navigate · esc close</span></div>';
-if(f.thumb)h+='<img class="main" src="'+f.thumb+'">';
-if(f.rot&&f.rot.length)h+='<div class="rotRow">'+f.rot.map(r=>'<figure><img loading="lazy" src="'+r.src+'"><figcaption>rotated '+r.a+'°</figcaption></figure>').join('')+'</div>';
+if(f.thumb)h+='<img class="main" src="'+esc(f.thumb)+'">';
+if(f.rot&&f.rot.length)h+='<div class="rotRow">'+f.rot.map(r=>'<figure><img loading="lazy" src="'+esc(r.src)+'"><figcaption>rotated '+r.a+'°</figcaption></figure>').join('')+'</div>';
 h+='<div class="vs" style="justify-content:flex-end;margin-bottom:14px"><span class="tag '+(f.ok?'gt':'pred')+'">pred '+f.pred+'</span><span class="tag gt">gt '+f.gt+'</span><span class="tag">'+(f.tokens||0)+' tok</span></div>';
-(f.steps||[]).forEach((s,j)=>{h+='<div class="step"><span class="sn">'+(j+1)+'</span>'+s.name+'('+esc(JSON.stringify(s.params))+')'+
-  (s.error?' → <span class="err">'+esc(s.error)+'</span>':'')+
-  (s.value!==undefined?' → <span class="val">'+s.value+'</span> <span style="color:var(--dim)">'+esc(s.note)+'</span>':'')+
-  (s.img?'<img loading="lazy" src="'+s.img+'">':'')+'</div>'});
-h+='<div class="reason">'+esc(f.reasoning||f.err||'(no reasoning)')+'</div>';
+function stepCap(s){
+  if(s.name==='view3d'){const p=s.params||{};let c='rotate → yaw '+(p.yaw_deg??0)+'° · pitch '+(p.pitch_deg??0)+'°';
+    if(p.threshold!==undefined&&p.threshold!==30)c+=' · threshold '+p.threshold;
+    if(p.zoom_pct&&p.zoom_pct>100)c+=' · zoom '+p.zoom_pct+'% @ ('+(p.center_x_pct??50)+'%, '+(p.center_y_pct??50)+'%)';
+    return c;}
+  return s.name+'('+Object.entries(s.params||{}).map(([k,v])=>k+'='+v).join(', ')+')';}
+if((f.steps||[]).length){
+  h+='<div class="navHdr">'+( (f.steps.some(s=>s.name==='view3d'))?'3D navigation — how the model explored this frame':'tool calls')+'</div><div class="navStrip">';
+  f.steps.forEach((s,j)=>{h+='<div class="step"><span class="sn">'+(j+1)+'</span><span class="cap">'+esc(stepCap(s))+'</span>'+
+    (s.error?'<div class="err">'+esc(s.error)+'</div>':'')+
+    (s.value!==undefined?'<div>→ <span class="val">'+s.value+'</span> <span style="color:var(--dim)">'+esc(s.note)+'</span></div>':'')+
+    (s.img?'<img loading="lazy" src="'+esc(s.img)+'">':'')+'</div>'});
+  h+='</div>';}
+h+='<div class="navHdr">model response</div><div class="reason">'+esc(f.reasoning||f.err||'(no reasoning)')+'</div>';
 if(f.override)h+='<div class="note">⚠ verify override: '+esc(f.override)+'</div>';
 if(f.budget_exhausted)h+='<div class="note">⚠ tool budget exhausted — classify was forced</div>';
 document.getElementById('modalBox').innerHTML=h;
