@@ -15,6 +15,7 @@ import importlib
 import io
 import json
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -305,8 +306,18 @@ def _embryo_span(ids: list[str]) -> str:
     return "e" + ",".join(str(n) for n in nums)
 
 
+def _week_prefix(ts: str) -> str:
+    """'20260609-...' → '[Week of 6/8]' (the Monday of that run's week)."""
+    try:
+        run_day = datetime.strptime(ts[:8], "%Y%m%d").date()
+    except ValueError:
+        return ""
+    monday = run_day - timedelta(days=run_day.weekday())
+    return f"[Week of {monday.month}/{monday.day}]"
+
+
 def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
-    """Human-readable dropdown label: what the solver change was, dataset, date."""
+    """Human-readable dropdown label: week group, what the change was, dataset, date."""
     solver, _model, ts = d.parts[-3:]
     desc = solver
     try:
@@ -321,7 +332,23 @@ def _run_label(d: Path, gt_embryos: dict[str, str]) -> str:
     except Exception:
         pass
     date = f"{ts[4:6]}/{ts[6:8]}" if len(ts) >= 8 else ts
-    return " · ".join(x for x in (desc, span, date) if x)
+    body = " · ".join(x for x in (desc, span, date) if x)
+    week = _week_prefix(ts)
+    return f"{week} {body}" if week else body
+
+
+def _experiment_description(solver_name: str) -> str:
+    """First paragraph of the solver's docstring — what the experiment tried.
+
+    (Results paragraphs come later in the docstrings and are deliberately
+    excluded; the report's own numbers speak for the outcome.)
+    """
+    try:
+        doc = importlib.import_module(f"harness.solvers.{solver_name}").__doc__ or ""
+    except Exception:
+        return ""
+    first_para = doc.strip().split("\n\n")[0]
+    return " ".join(line.strip() for line in first_para.splitlines())
 
 
 def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
@@ -339,7 +366,7 @@ def _sibling_runs(run_dir: Path) -> list[dict[str, Any]]:
     }
     dirs = {p.parent for p in runs_root.glob("*/*/*/report.html")} | {run_dir}
     out: list[dict[str, Any]] = []
-    for d in sorted(dirs, key=lambda p: (p.parts[-3], p.parts[-1]), reverse=True):
+    for d in sorted(dirs, key=lambda p: p.parts[-1], reverse=True):  # newest first → weeks cluster
         out.append(
             {
                 "label": _run_label(d, gt_embryos),
@@ -373,6 +400,7 @@ def generate(
     data: dict[str, Any] = {
         "config": config,
         "run_dir": str(run_dir),
+        "experiment": _experiment_description(str(config.get("solver", ""))),
         "runs": _sibling_runs(run_dir),
         "seed": seed,
         "summary": _summary(run_dir, gt),
@@ -500,6 +528,8 @@ table.cm td.zero{color:#3a3f4a}
 .runSel{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
 .runSel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:12px var(--mono);max-width:380px;cursor:pointer}
 .runSel select:hover{border-color:var(--accent)}
+.expDesc{margin:18px 0 0;padding:14px 18px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font:13px/1.65 var(--sans);color:var(--txt);max-width:980px}
+.expDesc::before{content:"experiment";display:block;font:11px var(--mono);color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -507,6 +537,7 @@ table.cm td.zero{color:#3a3f4a}
   <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
   <label class="runSel" id="runSelWrap">run <select id="runSel"></select></label>
 </div>
+<div class="expDesc" id="expDesc" hidden></div>
 <section><h2>Summary</h2><div class="kpis" id="kpis"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap"><div style="flex:1;min-width:300px"><div class="bars" id="bars"></div></div>
   <div><div style="font:11px var(--mono);color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Confusion (true ↓ / predicted →)</div><div id="cm"></div></div></div>
@@ -541,6 +572,9 @@ const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 // header
 document.getElementById('title').textContent=(D.config.solver||'run')+' · '+(D.config.model||'');
 document.getElementById('subtitle').textContent=D.run_dir+'  ·  seed'+D.seed+' detail  ·  '+D.summary.n_seeds+' seed(s) aggregated';
+
+// experiment description
+if(D.experiment){const ed=document.getElementById('expDesc');ed.textContent=D.experiment;ed.hidden=false;}
 
 // run switcher
 const runSel=document.getElementById('runSel');
