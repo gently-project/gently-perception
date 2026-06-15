@@ -56,7 +56,7 @@ def test_onset_pipeline_end_to_end(fake_volumes: Path, fake_gt: Path, tmp_path: 
     """Signal absent for tp 0-2, present from tp 3. Expect detection at tp 3,
     zero false positives, latency 0."""
 
-    levels = ["none", "none", "weak", "medium", "strong", "strong"]
+    levels = ["none", "none", "none", "weak", "medium", "strong"]
     call_idx = {"n": 0}
 
     async def fake_generate(**kw):
@@ -87,8 +87,10 @@ def test_onset_pipeline_end_to_end(fake_volumes: Path, fake_gt: Path, tmp_path: 
     events = run_dir / "seed0" / "events.jsonl"
     assert events.exists()
 
+    from harness.tasks.onset.dopaminergic import SPEC
+
     gt = OnsetGroundTruth.from_json(fake_gt)
-    score = score_onset_run(events, gt, threshold=Intensity.MEDIUM)
+    score = score_onset_run(events, gt, threshold=SPEC.threshold)
     row = score.per_embryo["embryo_3"]
 
     assert row["detected_at"] == 3, row

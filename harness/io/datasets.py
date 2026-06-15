@@ -38,9 +38,9 @@ DATASETS: dict[str, Dataset] = {
         name="sls762",
         hf_repo="pskeshu/perception-benchmark",
         hf_pattern="celegans_dopaminergic_sls762/**",
-        volumes_dir=DATA_DIR / "sls762",
+        volumes_dir=DATA_DIR / "sls762" / "celegans_dopaminergic_sls762" / "volumes",
         onset_gt=DATA_DIR / "ground_truth" / "onset" / "sls762.json",
-        notes="dat-1p::mNeonGreen dopaminergic reporter; embryos 3-6 are tagged. Gated: run `hf auth login`.",
-        embryo_filter=("embryo_3", "embryo_4", "embryo_5", "embryo_6"),
+        notes="dat-1p::mNeonGreen dopaminergic reporter. Gated: run `hf auth login`.",
+        embryo_filter=("embryo_003", "embryo_004", "embryo_005", "embryo_006"),
     ),
 }

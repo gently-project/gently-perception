@@ -2,13 +2,18 @@
   "dataset": "celegans_dopaminergic_sls762",
   "strain": "SLS762",
   "reporter": "dat-1p::mNeonGreen",
-  "notes": "PLACEHOLDER. Onset = first timepoint with visible dopaminergic puncta. Embryos 1-2 are untagged controls (null). Fill from the dataset README before scoring is meaningful.",
+  "source": "annotations.csv (Kesavan); README onset window t19-t21",
+  "indexing": "Harness timepoints are 0-indexed (t0001.tif -> tp 0); dataset filenames are 1-indexed.",
   "onset": {
-    "embryo_1": null,
-    "embryo_2": null,
-    "embryo_3": 0,
-    "embryo_4": 0,
-    "embryo_5": 0,
-    "embryo_6": 0
+    "embryo_003": 18,
+    "embryo_004": null,
+    "embryo_005": null,
+    "embryo_006": null
+  },
+  "notes": {
+    "embryo_003": "is_onset=True at t0019 (tp 18) and t0021 (tp 20); annotator note at t0020 says 'just before onset'. Treated as onset window.",
+    "embryo_004": "Only bracketing references annotated (blank t1, mature t50, hatched t80) — no onset frame, so scored as null until annotated.",
+    "embryo_005": "No annotations in annotations.csv.",
+    "embryo_006": "No annotations in annotations.csv."
   }
 }

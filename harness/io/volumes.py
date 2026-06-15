@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 _FNAME_RE = re.compile(r"^(?P<embryo>embryo_\d+)_(?P<ts>[\d_]+)\.(?:tif|tiff|npz)$", re.IGNORECASE)
+_TPOINT_RE = re.compile(r"^t(?P<ts>\d+)\.(?:tif|tiff|npz)$", re.IGNORECASE)
 
 
 class OfflineSource:
@@ -32,9 +33,12 @@ class OfflineSource:
             if not p.is_file():
                 continue
             m = _FNAME_RE.match(p.name)
-            if not m:
+            if m:
+                by_embryo.setdefault(m["embryo"], []).append((m["ts"], p))
                 continue
-            by_embryo.setdefault(m["embryo"], []).append((m["ts"], p))
+            m = _TPOINT_RE.match(p.name)
+            if m and p.parent.name.startswith("embryo_"):
+                by_embryo.setdefault(p.parent.name, []).append((m["ts"], p))
         items: list[tuple[str, int, Path]] = []
         for eid, files in by_embryo.items():
             files.sort(key=lambda x: x[0])
