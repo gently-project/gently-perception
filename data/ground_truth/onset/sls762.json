@@ -1,0 +1,14 @@
+{
+  "dataset": "celegans_dopaminergic_sls762",
+  "strain": "SLS762",
+  "reporter": "dat-1p::mNeonGreen",
+  "notes": "PLACEHOLDER. Onset = first timepoint with visible dopaminergic puncta. Embryos 1-2 are untagged controls (null). Fill from the dataset README before scoring is meaningful.",
+  "onset": {
+    "embryo_1": null,
+    "embryo_2": null,
+    "embryo_3": 0,
+    "embryo_4": 0,
+    "embryo_5": 0,
+    "embryo_6": 0
+  }
+}

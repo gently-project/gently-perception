@@ -49,6 +49,15 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--compare", type=Path, default=None, help="another run dir to diff against")
     pr.add_argument("--gt", type=Path, default=None)
 
+    pt = sub.add_parser("eval-task", help="run a perception task (onset detection) and score")
+    pt.add_argument("--task", required=True)
+    pt.add_argument("--n-runs", type=int, default=1)
+    pt.add_argument("--embryos", nargs="*", default=None)
+    pt.add_argument("--limit", type=int, default=None, help="max frames per embryo")
+    pt.add_argument("--concurrency", type=int, default=4)
+    pt.add_argument("--volumes", type=Path, default=None)
+    pt.add_argument("--gt", type=Path, default=None)
+
     args = p.parse_args(argv)
 
     if args.cmd == "eval":
@@ -94,6 +103,22 @@ def main(argv: list[str] | None = None) -> int:
 
         eid, t = args.frame.split("/")
         view_trajectory(args.events, eid, int(t.lstrip("T")))
+        return 0
+
+    if args.cmd == "eval-task":
+        from harness.eval.runner_task import run_task
+
+        asyncio.run(
+            run_task(
+                args.task,
+                n_runs=args.n_runs,
+                embryos=set(args.embryos) if args.embryos else None,
+                limit=args.limit,
+                concurrency=args.concurrency,
+                volumes_dir=args.volumes,
+                gt_path=args.gt,
+            )
+        )
         return 0
 
     if args.cmd == "report":

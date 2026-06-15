@@ -14,12 +14,29 @@ import argparse
 import sys
 from pathlib import Path
 
-HF_REPO = "pskeshu/gently-perception-benchmark"
 DATA_DIR = Path(__file__).parent / "data"
-VOLUMES_DIR = DATA_DIR / "volumes"
+
+DATASETS = {
+    "stage": {
+        "repo": "pskeshu/gently-perception-benchmark",
+        "pattern": "volumes/**",
+        "target": DATA_DIR / "volumes",
+        "size": "~35 GB",
+    },
+    "sls762": {
+        "repo": "pskeshu/perception-benchmark",
+        "pattern": "celegans_dopaminergic_sls762/**",
+        "target": DATA_DIR / "sls762",
+        "size": "~?? GB (gated; run `hf auth login` first)",
+    },
+}
+
+# Backward-compat for any external scripts that imported these.
+HF_REPO = DATASETS["stage"]["repo"]
+VOLUMES_DIR = DATASETS["stage"]["target"]
 
 
-def download_data(dry_run=False):
+def download_data(dataset: str = "stage", dry_run: bool = False):
     """Download volume data from HuggingFace."""
     try:
         from huggingface_hub import snapshot_download
@@ -27,38 +44,36 @@ def download_data(dry_run=False):
         print("huggingface_hub not installed. Run: pip install -r requirements.txt")
         sys.exit(1)
 
-    print(f"Dataset: {HF_REPO}")
-    print(f"Target:  {VOLUMES_DIR}")
+    cfg = DATASETS[dataset]
+    repo, pattern, target = cfg["repo"], cfg["pattern"], cfg["target"]
+    print(f"Dataset: {repo}  (pattern: {pattern})")
+    print(f"Target:  {target}")
 
-    if VOLUMES_DIR.exists() and any(VOLUMES_DIR.iterdir()):
-        n_embryos = len([d for d in VOLUMES_DIR.iterdir() if d.is_dir()])
-        print(f"\ndata/volumes/ already exists with {n_embryos} embryo folders.")
+    if target.exists() and any(target.iterdir()):
+        n_embryos = len([d for d in target.iterdir() if d.is_dir()])
+        print(f"\n{target.name}/ already exists with {n_embryos} embryo folders.")
         print("Re-running will only download new/changed files.")
 
     if dry_run:
         print("\n[DRY RUN] Would download from:")
-        print(f"  https://huggingface.co/datasets/{HF_REPO}")
-        print(f"  -> {VOLUMES_DIR}/")
-        print("\nRun without --dry-run to download (~35 GB).")
+        print(f"  https://huggingface.co/datasets/{repo}")
+        print(f"  -> {target}/")
+        print(f"\nRun without --dry-run to download ({cfg['size']}).")
         return
 
-    print(f"\nDownloading volumes (~35 GB)...")
-    print("This may take a while on the first run.\n")
-
+    print(f"\nDownloading ({cfg['size']})...\n")
     snapshot_download(
-        repo_id=HF_REPO,
+        repo_id=repo,
         repo_type="dataset",
-        local_dir=str(DATA_DIR),
-        allow_patterns=["volumes/**"],
+        local_dir=str(target),
+        allow_patterns=[pattern],
     )
 
-    # Verify
-    if VOLUMES_DIR.exists():
-        embryos = [d for d in VOLUMES_DIR.iterdir() if d.is_dir()]
-        total_files = sum(1 for e in embryos for _ in e.glob("*.tif"))
-        print(f"\nDone! {len(embryos)} embryos, {total_files} volume files.")
+    if target.exists():
+        files = list(target.rglob("*.tif")) + list(target.rglob("*.tiff")) + list(target.rglob("*.npz"))
+        print(f"\nDone! {len(files)} volume files under {target}.")
     else:
-        print("\nWarning: data/volumes/ not found after download.")
+        print(f"\nWarning: {target} not found after download.")
         print("Check the HuggingFace repo structure.")
 
 
@@ -81,6 +96,10 @@ def main():
         description="Download benchmark data from HuggingFace"
     )
     parser.add_argument(
+        "--dataset", choices=sorted(DATASETS), default="stage",
+        help="Which dataset to download",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Show what would be downloaded without downloading",
     )
@@ -90,7 +109,7 @@ def main():
     )
     args = parser.parse_args()
 
-    download_data(dry_run=args.dry_run)
+    download_data(dataset=args.dataset, dry_run=args.dry_run)
 
     if args.filmstrip and not args.dry_run:
         generate_filmstrip()
