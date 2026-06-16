@@ -27,7 +27,7 @@ DATASETS = {
         "repo": "pskeshu/perception-benchmark",
         "pattern": "celegans_dopaminergic_sls762/**",
         "target": DATA_DIR / "sls762",
-        "size": "~?? GB (gated; run `hf auth login` first)",
+        "size": "~1.5 GB",
     },
 }
 

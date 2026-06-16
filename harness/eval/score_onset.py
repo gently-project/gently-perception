@@ -101,12 +101,11 @@ def score_onset_run(
         row = s.per_embryo[eid]
         row["trace"].append((tp, level.value))
         is_pos_gt = gt.is_positive(eid, tp)
-        called_pos = level >= threshold
         if is_pos_gt is False:
             row["n_neg_frames"] += 1
-            if called_pos:
+            if level >= threshold:
                 row["n_false_pos"] += 1
-        if called_pos and row["detected_at"] is None:
+        if ev.payload.get("onset") and row["detected_at"] is None:
             row["detected_at"] = tp
     return s
 

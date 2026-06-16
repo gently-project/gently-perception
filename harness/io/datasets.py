@@ -40,7 +40,7 @@ DATASETS: dict[str, Dataset] = {
         hf_pattern="celegans_dopaminergic_sls762/**",
         volumes_dir=DATA_DIR / "sls762" / "celegans_dopaminergic_sls762" / "volumes",
         onset_gt=DATA_DIR / "ground_truth" / "onset" / "sls762.json",
-        notes="dat-1p::mNeonGreen dopaminergic reporter. Gated: run `hf auth login`.",
+        notes="dat-1p::mNeonGreen dopaminergic reporter.",
         embryo_filter=("embryo_003", "embryo_004", "embryo_005", "embryo_006"),
     ),
 }

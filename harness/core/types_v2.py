@@ -233,6 +233,8 @@ class SignalSpec:
     """Classifier: text-only call mapping prose → Intensity per these criteria."""
     threshold: Intensity = Intensity.WEAK
     """First level that counts as 'signal present'."""
+    debounce: int = 2
+    """Consecutive frames at >= threshold required before onset fires."""
     render: RenderSpec = RenderSpec("dual_view_calib")
     arming: ArmingPolicy = ArmingPolicy.ALWAYS
     on_detect: Action | None = None

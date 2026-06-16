@@ -86,7 +86,7 @@ async def _classify(spec: SignalSpec, description: str, model: str) -> tuple[dic
 
 
 def make_onset_task(spec: SignalSpec, *, model: str = DEFAULT_MODEL) -> Task[IntensityObservation]:
-    threshold = spec.threshold
+    threshold, debounce = spec.threshold, spec.debounce
 
     async def run(inp: TaskInput) -> tuple[IntensityObservation, Trajectory]:
         traj = Trajectory()
@@ -106,7 +106,13 @@ def make_onset_task(spec: SignalSpec, *, model: str = DEFAULT_MODEL) -> Task[Int
         prev_onset = any(
             isinstance(o, IntensityObservation) and o.onset for o in inp.own_history
         )
-        onset = (not prev_onset) and level >= threshold
+        streak = 1
+        for o in reversed(inp.own_history):
+            if isinstance(o, IntensityObservation) and o.value >= threshold:
+                streak += 1
+            else:
+                break
+        onset = (not prev_onset) and level >= threshold and streak >= debounce
 
         obs = IntensityObservation(
             task=spec.name,
@@ -147,6 +153,7 @@ def spec_sha(spec: SignalSpec) -> str:
             "describe": spec.describe_prompt,
             "rubric": {k.value: v for k, v in spec.rubric.items()},
             "threshold": spec.threshold.value,
+            "debounce": spec.debounce,
             "render": spec.render.name,
         },
         sort_keys=True,

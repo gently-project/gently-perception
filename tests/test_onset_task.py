@@ -53,10 +53,11 @@ def _msg(text: str | None = None, tool_input: dict | None = None):
 
 
 def test_onset_pipeline_end_to_end(fake_volumes: Path, fake_gt: Path, tmp_path: Path):
-    """Signal absent for tp 0-2, present from tp 3. Expect detection at tp 3,
-    zero false positives, latency 0."""
+    """Isolated noise spike at tp 1; real signal from tp 3. With debounce=2,
+    onset fires at tp 4 (second consecutive >=threshold), latency +1,
+    one raw FP frame at tp 1."""
 
-    levels = ["none", "none", "none", "weak", "medium", "strong"]
+    levels = ["none", "weak", "none", "weak", "medium", "strong"]
     call_idx = {"n": 0}
 
     async def fake_generate(**kw):
@@ -93,11 +94,11 @@ def test_onset_pipeline_end_to_end(fake_volumes: Path, fake_gt: Path, tmp_path: 
     score = score_onset_run(events, gt, threshold=SPEC.threshold)
     row = score.per_embryo["embryo_3"]
 
-    assert row["detected_at"] == 3, row
-    assert row["n_false_pos"] == 0, row
+    assert row["detected_at"] == 4, row
+    assert row["n_false_pos"] == 1, row
     assert score.miss_rate == 0.0
-    assert score.mean_latency == 0.0
-    assert score.fp_rate == 0.0
+    assert score.mean_latency == 1.0
+    assert score.fp_rate == pytest.approx(1 / 3)
     assert score.n == 6
     assert score.tokens > 0
 
