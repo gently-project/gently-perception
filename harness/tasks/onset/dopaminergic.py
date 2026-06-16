@@ -59,7 +59,7 @@ SPEC = SignalSpec(
     describe_prompt=DESCRIBE_PROMPT,
     rubric=RUBRIC,
     threshold=Intensity.WEAK,
-    render=RenderSpec("single_view_fixed", {"lo": 100.0, "hi": 4000.0}),
+    render=RenderSpec("single_view_fixed", {"lo": 120.0, "hi": 800.0}),
     arming=ArmingPolicy(
         predicate=lambda s: (s.stage_estimate or Stage.EARLY).ordinal >= Stage.ONE_HALF_FOLD.ordinal,
         latch=True,
